@@ -2,7 +2,7 @@ import torch
 from torch.autograd import Variable
 import torch.nn as nn
 import torch.optim as optim
-import torch.functional as F
+import torch.nn.functional as F
 import numpy as np
 
 class Updater():
@@ -13,7 +13,7 @@ class Updater():
     calc_gradients followed by update_model. If the size of the epoch is restricted by the memory, you can call calc_gradients to clear the graph.
     """
 
-    def __init__(self, net, lr, entropy_const=0.01, value_const=0.5, gamma=0.99, _lambda=0.98):
+    def __init__(self, net, lr, entropy_const=0.01, value_const=0.5, gamma=0.99, _lambda=0.98, max_norm=0.5):
         self.net = net
         self.optim = optim.Adam(self.net.parameters(), lr=lr)
         self.global_loss = 0 # Used for efficiency in backprop
@@ -21,20 +21,39 @@ class Updater():
         self.value_const = value_const
         self.gamma = gamma
         self._lambda = _lambda
+        self.max_norm = max_norm
+
+        # Tracking variables
+        self.pg_loss = 0
+        self.value_loss = 0
+        self.entropy = 0
+        self.loss_count = 0
+        self.info = {}
 
     def calc_gradients(self):
         """
         Calculates the gradients of each parameter within the net from the global_loss
         Variable.
+
+        Returns the loss as a float
         """
 
         try:
-            loss = self.global_loss[0]
             self.global_loss.backward()
+            self.norm = nn.utils.clip_grad_norm(self.net.parameters(), self.max_norm)
+            if self.loss_count > 0:
+                self.info = {"Global Loss":self.global_loss.data[0]/self.loss_count,
+                            "Policy Loss":self.pg_loss/self.loss_count,
+                            "Value Loss":self.value_loss/self.loss_count,
+                            "Entropy":self.entropy/self.loss_count,
+                            "Norm":self.norm}
             self.global_loss = 0
-            return loss
+            self.pg_loss = 0
+            self.value_loss = 0
+            self.entropy = 0
+            self.loss_count = 0
         except RuntimeError:
-            return 0
+            print("Attempted to use self.global_loss.backward() when no graph is created yet!")
 
     def calc_loss(self, states, rewards, dones, actions, advantages):
         """
@@ -51,18 +70,26 @@ class Updater():
                 indexes taken in the rollout
         """
 
+        states = Variable(torch.FloatTensor(states))
         values, raw_pis = self.net.forward(states)
         softlog_pis = F.log_softmax(raw_pis, dim=-1)
-        softlog_pis = softlog_pis[list(range(softlog_pis.size(0))), actions]
+        softlog_column = softlog_pis[list(range(softlog_pis.size(0))), actions]
         advantages = self.discount(advantages, dones, self.gamma*self._lambda)
-        action_loss = softlog_pis*advantages
+        pg_step = softlog_column*Variable(torch.FloatTensor(advantages))
+        pg_loss = -torch.mean(pg_step)
 
         value_targets = self.discount(rewards, dones, self.gamma)
-        value_loss = self.value_const*F.mse_loss(values, Variable(discounted_rewards))
+        value_loss = self.value_const*F.mse_loss(values.squeeze(), Variable(torch.FloatTensor(value_targets)))
 
-        entropy = self.entropy_const*-torch.mean(F.softmax(raw_pis, dim=-1)*softlog_pis)
+        softmaxes = F.softmax(raw_pis, dim=-1)
+        entropy_step = softmaxes*softlog_pis
+        entropy = -self.entropy_const*torch.mean(entropy_step)
 
-        self.global_loss += action_loss + value_loss + entropy
+        self.global_loss += pg_loss + value_loss - entropy
+        self.pg_loss += pg_loss.data[0]
+        self.value_loss += value_loss.data[0]
+        self.entropy += entropy.data[0]
+        self.loss_count += 1
 
     def discount(self, array, mask, discount_factor):
         """
@@ -71,22 +98,37 @@ class Updater():
         array - array to be discounted
         mask - binary array denoting the end of an episode
         discount_factor - float between 0 and 1 used to discount the reward
+
+        Returns the discounted array as an ndarray of type np.float32
         """
 
         running_sum = 0
-        discounts = [0]*len(array)
+        discounts = np.zeros(len(array))
         for i in reversed(range(len(array))):
             if mask[i] == 1: running_sum = 0
             running_sum = array[i] + discount_factor*running_sum
             discounts[i] = running_sum
         return discounts
 
+    def print_statistics(self):
+        print(" – ".join([key+": "+str(round(val,5)) for key,val in self.info.items()]))
+
+    def save_model(self, net_file_name, optim_file_name):
+        """
+        Saves the state dict of the model to file.
+
+        file_name - string name of the file to save the state_dict to
+        """
+        torch.save(self.net.state_dict(), net_file_name)
+        torch.save(self.optim.state_dict(), optim_file_name)
+
     def update_model(self):
         """
-        Calculates any residual gradients and then updates the model.
+        Performs backprop on any residual graphs and then updates the model using gradient
+        descent.
         """
 
-        loss = self.calc_gradients()
+        self.calc_gradients()
 
         self.optim.step()
         self.optim.zero_grad()
