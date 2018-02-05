@@ -2,6 +2,8 @@ import gym
 import gym_snake
 import torch
 import numpy as np
+from torch.autograd import Variable
+import matplotlib.pyplot as plt
 
 
 class Collector():
@@ -14,31 +16,38 @@ class Collector():
         torch.LongTensor = torch.cuda.LongTensor
 
 
-    def __init__(self, n_envs=1, grid_size=[15,15], n_foods=1, unit_size=10, n_state_frames=3, net=None, n_tsteps=15, gamma=0.99):
 
-        envs = [gym.make('snake-v0') for env in range(n_envs)]
+    def __init__(self, n_envs=1, grid_size=[15,15], n_foods=1, unit_size=10, n_state_frames=3, net=None, n_tsteps=15, gamma=0.99, env_type='snake-v0'):
+
+        self.n_envs = n_envs
+        self.envs = [gym.make(env_type) for env in range(n_envs)]
         for i in range(n_envs):
-            envs[i].grid_size = grid_size
-            envs[i].n_foods = n_foods
-            envs[i].unit_size = unit_size
+            self.envs[i].grid_size = grid_size
+            self.envs[i].n_foods = n_foods
+            self.envs[i].unit_size = unit_size
 
-        observations = [self.preprocess(torch.FloatTensor(envs[i].reset())) for i in range(n_envs)]
-        self.prepped_shape = observations[0].shape
-        prepped_obs = observations[0] # Moves channels to first dimension
-        self.state_shape = [n_state_frames*prepped_obs.size(0),*prepped_obs.size()[1:]]
-        self.state_bookmarks = [self.make_state(obs) for obs in observations]
+        observations = [self.envs[i].reset() for i in range(n_envs)]
+        self.PREP_MEAN = np.mean(observations[0])
+        prepped_observations = [self.preprocess(obs) for obs in observations]
+        self.prepped_shape = prepped_observations[0].shape
+        prepped_obs = prepped_observations[0] # Moves channels to first dimension
+        self.state_shape = [n_state_frames*prepped_obs.shape[0],*prepped_obs.shape[1:]]
+        self.state_bookmarks = [self.make_state(obs) for obs in prepped_observations]
 
+        self.gamma = gamma
         self.net = net
         self.n_tsteps = n_tsteps
         self.T = 0
-        self.gamma = gamma
+        self.avg_reward = 0
 
-    def get_data(self):
+
+
+    def get_data(self, render=False):
         """
         Used as the external call to get a rollout from each environment.
 
         Returns python lists of the relavent data.
-        ep_states - python list of torch FloatTensors with dimensions of state_shape
+        ep_states - ndarray with dimensions of [num_samples, *state_shape]
         ep_rewards - python list of float values collected from rolling out the environments
         ep_dones - python list of booleans denoting the end of an episode
         ep_actions - python list of integers denoting the actual selected actions in the
@@ -47,10 +56,14 @@ class Collector():
                     the equation r(t) + gamma*V(t+1) - V(t)
         """
 
-        ep_states, ep_rewards, ep_dones, ep_actions = [], [], [], []
+        self.net.calculate_grads(False)
+        self.net.train(mode=False)
+        ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages = [], [], [], [], []
         for i in range(self.n_envs):
-            ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages = self.rollout(i, ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages)
-        return ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages
+            ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages = self.rollout(i, ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages, render and i==0)
+        self.net.calculate_grads(True)
+        self.net.train(mode=True)
+        return np.asarray(ep_states,dtype=np.float32), ep_rewards, ep_dones, ep_actions, ep_advantages
 
     def rollout(self, env_idx, states, rewards, dones, actions, advantages, render=False):
         """
@@ -67,7 +80,7 @@ class Collector():
         advantages - python list of advantages accumulated during the current epoch
 
         Returns python lists of the relavent data.
-        states - python list of torch FloatTensors with dimensions of state_shape
+        states - python list of all states collected in this rollout
         rewards - python list of float values collected from rolling out the environments
         dones - python list of booleans denoting the end of an episode
         actions - python list of integers denoting the actual selected actions in the
@@ -77,34 +90,35 @@ class Collector():
         """
 
         state = self.state_bookmarks[env_idx]
-        states, rewards, dones, actions, advantages = [], [], [], [], []
         for i in range(self.n_tsteps):
             if render:
-                self.envs[env_idx].render()
+                self.envs[env_idx].render(mode='human')
             self.T += 1
 
-            value, pi = self.net.forward(Variable(state))
+            value, pi = self.net.forward(Variable(torch.FloatTensor(state).unsqueeze(0)))
             action = self.get_action(pi.data)
             obs, reward, done, info = self.envs[env_idx].step(action)
+            if reward is not 0:
+                self.avg_reward = .99*self.avg_reward + 0.01*reward
 
             value = value.squeeze().data[0]
             if i > 0:
-                advantage = self.temporal_difference(rewards[-1], value*(1-done), last_value)
-                last_value = value*(1-done)
+                advantage = self.temporal_difference(rewards[-1], value*(1-dones[-1]), last_value)
+                last_value = value
+                advantages.append(advantage)
             else:
                 last_value = value
 
-            states.append(state),rewards.append(reward),dones.append(done)
-            actions.append(action),advantages.append(advantage)
+            states.append(state), rewards.append(reward), dones.append(done), actions.append(action)
 
             state = self.next_state(env_idx, state, obs, done)
 
         self.state_bookmarks[env_idx] = state
         if not done:
-            value, pi = net.forward(state)
-            rewards[-1] = reward + last_value # Bootstrapped value
-            advantage, last_value = self.temporal_difference(rewards[-1], value.squeeze().data[0], last_value)
+            value, pi = self.net.forward(Variable(torch.FloatTensor(state).unsqueeze(0)))
+            advantage = self.temporal_difference(rewards[-1], value.squeeze().data[0], last_value)
             advantages.append(advantage)
+            rewards[-1] = reward + last_value # Bootstrapped value
             dones[-1] = True
         else:
             advantages.append(rewards[-1]-last_value)
@@ -133,22 +147,23 @@ class Collector():
         """
 
         if prev_state is None:
-            prev_state = torch.FloatTensor(torch.zeros(self.state_shape))
+            prev_state = np.zeros(self.state_shape, dtype=np.float32)
 
-        next_state = torch.cat([prepped_obs, prev_state[:-prepped_obs.size(0)]], dim=0)
-        return next_state.unsqueeze(0)
+        next_state = np.concatenate([prepped_obs, prev_state[:-prepped_obs.shape[0]]], axis=0)
+        return next_state
 
     def next_state(self, env_idx, prev_state, obs, done):
         """
         Get the next state of the environment corresponding to the env_idx.
 
         env_idx - integer index denoting environment of interest
-        prev_state - torch FloatTensor of the state used in the most recent action
+        prev_state - ndarray of the state used in the most recent action
                     prediction
         obs - ndarray returned from the most recent step of the environment
         done - boolean denoting the done signal from the most recent step of the
                 environment
         """
+
         if done:
             obs = self.envs[env_idx].reset()
             prev_state = None
@@ -161,9 +176,11 @@ class Collector():
         Each raw observation from the environment is run through this function.
         Put anything sort of preprocessing into this function.
 
-        observation - torch FloatTensor of an observation from the environment
+        observation - ndarray of an observation from the environment
         """
-        return observation.permute(2,0,1)
+
+        observation = (observation-self.PREP_MEAN)/255
+        return observation.transpose((2,0,1))
 
     def softmax(self, X, theta=1.0, axis=-1):
         """
