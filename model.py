@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 '''
-Simple, sequential convolutional net
+Simple, sequential convolutional net.
 '''
 
 class Model(nn.Module):
@@ -18,22 +18,18 @@ class Model(nn.Module):
         self.dropouts = nn.ModuleList([]) # Used in dense block
 
         self.bnorm0 = nn.BatchNorm2d(input_space[-3])
-        self.conv1 = self.conv_block(input_space[-3],8,max_pool=False)
+        self.conv1 = self.conv_block(input_space[-3],16)
         self.convs.append(self.conv1)
-        self.conv2 = self.conv_block(8, 8, stride=2, bnorm=True, max_pool=False)
+        self.conv2 = self.conv_block(16, 24, stride=2, bnorm=True)
         self.convs.append(self.conv2)
-        self.conv3 = self.conv_block(8, 16, bnorm=True, max_pool=False)
+        self.conv3 = self.conv_block(24, 36, stride=2, bnorm=True)
         self.convs.append(self.conv3)
-        self.conv4 = self.conv_block(16, 16, stride=2, bnorm=True, max_pool=False)
-        self.convs.append(self.conv4)
-        self.conv5 = self.conv_block(16, 24, bnorm=True, max_pool=False)
-        self.convs.append(self.conv5)
 
         self.features = nn.Sequential(*self.convs)
         self.classifier = None
 
 
-    def conv_block(self, chan_in, chan_out, ksize=3, stride=1, padding=1, activation="relu", max_pool=True, bnorm=True):
+    def conv_block(self, chan_in, chan_out, ksize=3, stride=1, padding=1, activation="relu", max_pool=False, bnorm=True):
         block = []
         block.append(nn.Conv2d(chan_in, chan_out, ksize, stride, padding=padding))
         activation=activation.lower()
@@ -51,7 +47,7 @@ class Model(nn.Module):
             block.append(nn.BatchNorm2d(chan_out))
         return nn.Sequential(*block)
 
-    def dense_block(self, chan_in, chan_out, dropout_p=1., activation="relu", batch_norm=True):
+    def dense_block(self, chan_in, chan_out, dropout_p=0, activation="relu", batch_norm=True):
         block = []
         dropout = nn.Dropout(dropout_p)
         block.append(dropout)
@@ -71,14 +67,14 @@ class Model(nn.Module):
         return nn.Sequential(*block)
 
     def forward(self, x):
-        feats = self.features(x)
+        feats = self.bnorm0(x)
+        feats = self.features(feats)
         feats = feats.view(feats.size(0), -1)
-        if type(self.classifier) == type(None):
-            print("Flat size:",feats.size(1))
+        if self.classifier is None:
             modules = [self.dense_block(feats.size(1), 200, batch_norm=False)]
             modules.append(self.dense_block(200, 200, batch_norm=False))
             self.precursor = nn.Sequential(*modules)
-            self.classifier = self.dense_block(200,int(self.output_space),activation="none",batch_norm=False)
+            self.classifier = self.dense_block(200,self.output_space,activation="none",batch_norm=False)
             self.evaluator = self.dense_block(200, 1, activation="none", batch_norm=False)
         feats = self.precursor(feats)
         return self.evaluator(feats), self.classifier(feats)
