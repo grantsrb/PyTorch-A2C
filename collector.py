@@ -115,9 +115,9 @@ class Collector():
         if not done:
             value, pi = self.net.forward(Variable(torch.FloatTensor(state).unsqueeze(0)))
             value = value.squeeze().data[0]
-            advantage = self.temporal_difference(rewards[-1], value, last_value)
-            advantages.append(advantage)
             rewards[-1] = reward + self.gamma*value # Bootstrapped value
+            advantage = self.temporal_difference(rewards[-1], 0, last_value)
+            advantages.append(advantage)
             dones[-1] = True
         else:
             advantages.append(rewards[-1]-last_value)
