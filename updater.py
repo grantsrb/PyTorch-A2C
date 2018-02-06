@@ -79,7 +79,7 @@ class Updater():
         pg_loss = -torch.mean(pg_step)
 
         value_targets = self.discount(rewards, dones, self.gamma)
-        value_loss = self.value_const*F.mse_loss(values.squeeze(), Variable(torch.FloatTensor(value_targets)))
+        value_loss =self.value_const*F.mse_loss(values.squeeze(),Variable(torch.FloatTensor(value_targets)))
 
         softmaxes = F.softmax(raw_pis, dim=-1)
         entropy_step = softmaxes*softlog_pis
@@ -109,6 +109,32 @@ class Updater():
             running_sum = array[i] + discount_factor*running_sum
             discounts[i] = running_sum
         return discounts
+
+    def normalize(self, array, mean=None, std=None):
+        """
+        Normalizes the array's values. Optionally pass a specific mean or standard
+        deviation to use for normalization.
+
+        array - 1 dimensional ndarray or torch FloatTensor
+        mean - optional float denoting the mean to use for normalization.
+                If None, the mean will be calculated from the array
+        std - optional float denoting the standard deviation to use for 
+              normalization. If None, the standard deviation will be 
+              calculated from the array.
+        """
+
+        if mean is None:
+            if type(array) == type(np.array()):
+                mean = np.mean(array)
+            else:
+                mean = torch.mean(array)
+        if std is None:
+            if type(array) == type(np.array()):
+                std = np.std(array)
+            else:
+                std = torch.std(array)
+
+        return (array - mean)/std
 
     def print_statistics(self):
         print(" – ".join([key+": "+str(round(val,5)) for key,val in self.info.items()]))
