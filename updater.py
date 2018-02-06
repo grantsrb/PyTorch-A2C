@@ -15,7 +15,7 @@ class Updater():
 
     def __init__(self, net, lr, entropy_const=0.01, value_const=0.5, gamma=0.99, _lambda=0.98, max_norm=0.5):
         self.net = net
-        self.optim = optim.Adam(self.net.parameters(), lr=lr)
+        self.optim = optim.RMSProp(self.net.parameters(), lr=lr)
         self.global_loss = 0 # Used for efficiency in backprop
         self.entropy_const = entropy_const
         self.value_const = value_const
@@ -125,12 +125,12 @@ class Updater():
         """
 
         if mean is None:
-            if type(array) == type(np.array()):
+            if type(array) == type(np.array([])):
                 mean = np.mean(array)
             else:
                 mean = torch.mean(array)
         if std is None:
-            if type(array) == type(np.array()):
+            if type(array) == type(np.array([])):
                 std = np.std(array)
             else:
                 std = torch.std(array)
