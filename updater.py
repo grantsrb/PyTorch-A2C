@@ -75,6 +75,7 @@ class Updater():
         softlog_pis = F.log_softmax(raw_pis, dim=-1)
         softlog_column = softlog_pis[list(range(softlog_pis.size(0))), actions]
         advantages = self.discount(advantages, dones, self.gamma*self._lambda)
+        advantages = self.normalize(advantages)
         pg_step = softlog_column*Variable(torch.FloatTensor(advantages))
         pg_loss = -torch.mean(pg_step)
 
