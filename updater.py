@@ -15,7 +15,7 @@ class Updater():
 
     def __init__(self, net, lr, entropy_const=0.01, value_const=0.5, gamma=0.99, _lambda=0.98, max_norm=0.5):
         self.net = net
-        self.optim = optim.RMSProp(self.net.parameters(), lr=lr)
+        self.optim = optim.RMSprop(self.net.parameters(), lr=lr)
         self.global_loss = 0 # Used for efficiency in backprop
         self.entropy_const = entropy_const
         self.value_const = value_const
@@ -119,8 +119,8 @@ class Updater():
         array - 1 dimensional ndarray or torch FloatTensor
         mean - optional float denoting the mean to use for normalization.
                 If None, the mean will be calculated from the array
-        std - optional float denoting the standard deviation to use for 
-              normalization. If None, the standard deviation will be 
+        std - optional float denoting the standard deviation to use for
+              normalization. If None, the standard deviation will be
               calculated from the array.
         """
 
