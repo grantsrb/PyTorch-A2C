@@ -135,7 +135,7 @@ class Updater():
             else:
                 std = torch.std(array)
 
-        return (array - mean)/std
+        return (array - mean)/(std+1e-7)
 
     def print_statistics(self):
         print(" – ".join([key+": "+str(round(val,5)) if "ntropy" not in key else key+": "+str(val) for key,val in self.info.items()]))
