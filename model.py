@@ -28,6 +28,8 @@ class Model(nn.Module):
         self.features = nn.Sequential(*self.convs)
         self.classifier = None
 
+        self.flat_shape = None
+
 
     def conv_block(self, chan_in, chan_out, ksize=3, stride=1, padding=1, activation="relu", max_pool=False, bnorm=True):
         block = []
@@ -71,6 +73,7 @@ class Model(nn.Module):
         feats = self.features(feats)
         feats = feats.view(feats.size(0), -1)
         if self.classifier is None:
+            self.flat_shape = feats.shape
             modules = [self.dense_block(feats.size(1), 200, batch_norm=False)]
             modules.append(self.dense_block(200, 200, batch_norm=False))
             self.precursor = nn.Sequential(*modules)
