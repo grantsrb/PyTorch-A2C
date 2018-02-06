@@ -168,16 +168,22 @@ class Collector():
         state = self.make_state(prepped_obs, prev_state)
         return state
 
-    def preprocess(self, observation):
+    def preprocess(self, pic, env_type='snake-v0'):
         """
         Each raw observation from the environment is run through this function.
         Put anything sort of preprocessing into this function.
 
-        observation - ndarray of an observation from the environment
+        pic - ndarray of an observation from the environment [H,W,C]
         """
 
-        observation = (observation-self.PREP_MEAN)/255
-        return observation.transpose((2,0,1))
+        if env_type == "snake-v0":
+            new_pic = np.zeros(pic.shape,dtype=np.float32)
+            new_pic[:,:,0][pic[:,:,0]==1] = 1
+            new_pic[:,:,0][pic[:,:,0]==255] = 1.5
+            new_pic[:,:,1][pic[:,:,1]==255] = 0
+            new_pic[:,:,2][pic[:,:,2]==255] = .3
+            pic = np.sum(new_pic, axis=-1)[None]
+        return pic.transpose((2,0,1))
 
     def softmax(self, X, theta=1.0, axis=-1):
         """
