@@ -96,8 +96,7 @@ class Collector():
             value, pi = self.net.forward(Variable(torch.FloatTensor(state).unsqueeze(0)))
             action = self.get_action(pi.data)
             obs, reward, done, info = self.envs[env_idx].step(action)
-            if reward is not 0:
-                self.avg_reward = .99*self.avg_reward + 0.01*reward
+            if reward is not 0: self.avg_reward = .99*self.avg_reward + 0.01*reward
 
             value = value.squeeze().data[0]
             if i > 0:
@@ -108,7 +107,6 @@ class Collector():
                 last_value = value
 
             states.append(state), rewards.append(reward), dones.append(done), actions.append(action)
-
             state = self.next_state(env_idx, state, obs, done)
 
         self.state_bookmarks[env_idx] = state
