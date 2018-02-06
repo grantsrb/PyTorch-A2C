@@ -137,7 +137,7 @@ class Updater():
         return (array - mean)/std
 
     def print_statistics(self):
-        print(" – ".join([key+": "+str(round(val,5)) for key,val in self.info.items()]))
+        print(" – ".join([key+": "+str(round(val,5)) if "ntropy" not in key else key+": "+str(val) for key,val in self.info.items()]))
 
     def save_model(self, net_file_name, optim_file_name):
         """
