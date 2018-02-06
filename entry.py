@@ -12,15 +12,15 @@ env_type = 'snake-v0'
 
 # Hyperparameters
 gamma = .99 # Reward discount factor
-_lambda = .97 # GAE moving average factor
+_lambda = .98 # GAE moving average factor
 n_rollouts = 3 # Number of times to perform rollouts before updating model
-n_envs = 10 # Number of environments
-n_tsteps = 10 # Maximum number of steps to take in an environment for one episode
-val_const = .08 # Scales the value portion of the loss function
-entropy_const = 0.02 # Scales the entropy portion of the loss function
+n_envs = 16 # Number of environments
+n_tsteps = 15 # Maximum number of steps to take in an environment for one episode
+val_const = .1 # Scales the value portion of the loss function
+entropy_const = 0.01 # Scales the entropy portion of the loss function
 max_norm = 0.4 # Scales the gradients using their norm
 lr = 1e-3 # Divide by batchsize as a shortcut to averaging the gradient over multiple batches
-n_state_frames = 2 # number of observations to stack for a single environment state
+n_state_frames = 3 # number of observations to stack for a single environment state
 
 # Environment Choices
 grid_size = [15,15]
@@ -86,6 +86,7 @@ else:
 
 collector = Collector(n_envs=n_envs, grid_size=grid_size, n_foods=n_foods, unit_size=unit_size, n_state_frames=n_state_frames, net=None, n_tsteps=n_tsteps, gamma=gamma, env_type=env_type)
 net = Model(collector.state_shape, action_space)
+dummy = net.forward(Variable(torch.zeros(2,*collector.state_shape)))
 collector.net = net
 updater = Updater(collector.net, lr, entropy_const=entropy_const, value_const=val_const, gamma=gamma, _lambda=_lambda, max_norm=max_norm)
 if resume:
