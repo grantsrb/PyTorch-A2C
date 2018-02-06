@@ -15,8 +15,6 @@ class Collector():
         torch.FloatTensor = torch.cuda.FloatTensor
         torch.LongTensor = torch.cuda.LongTensor
 
-
-
     def __init__(self, n_envs=1, grid_size=[15,15], n_foods=1, unit_size=10, n_state_frames=3, net=None, n_tsteps=15, gamma=0.99, env_type='snake-v0'):
 
         self.n_envs = n_envs
@@ -116,9 +114,10 @@ class Collector():
         self.state_bookmarks[env_idx] = state
         if not done:
             value, pi = self.net.forward(Variable(torch.FloatTensor(state).unsqueeze(0)))
-            advantage = self.temporal_difference(rewards[-1], value.squeeze().data[0], last_value)
+            value = value.squeeze().data[0]
+            advantage = self.temporal_difference(rewards[-1], value, last_value)
             advantages.append(advantage)
-            rewards[-1] = reward + last_value # Bootstrapped value
+            rewards[-1] = reward + self.gamma*value # Bootstrapped value
             dones[-1] = True
         else:
             advantages.append(rewards[-1]-last_value)
