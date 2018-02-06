@@ -41,6 +41,7 @@ collector.net.calculate_grads(False)
 collector.net.forward(dummy)
 collector.net.train(mode=False)
 collector.net.load_state_dict(torch.load(file_name))
+print(collector.net.flat_shape)
 
 while True:
     data = collector.get_data(True)
