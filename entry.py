@@ -1,7 +1,7 @@
 import sys
 from collector import Collector
 from updater import Updater
-from model import Model
+import dense_model as model
 import torch
 from torch.autograd import Variable
 import gc
@@ -20,7 +20,7 @@ val_const = .1 # Scales the value portion of the loss function
 entropy_const = 0.01 # Scales the entropy portion of the loss function
 max_norm = 0.4 # Scales the gradients using their norm
 lr = 1e-3 # Divide by batchsize as a shortcut to averaging the gradient over multiple batches
-n_state_frames = 3 # number of observations to stack for a single environment state
+n_state_frames = 2 # number of observations to stack for a single environment state
 
 # Environment Choices
 grid_size = [15,15]
@@ -84,16 +84,17 @@ else:
     log_file = exp_name+"_log.txt"
 
 
-collector = Collector(n_envs=n_envs, grid_size=grid_size, n_foods=n_foods, unit_size=unit_size, n_state_frames=n_state_frames, net=None, n_tsteps=n_tsteps, gamma=gamma, env_type=env_type)
-net = Model(collector.state_shape, action_space)
+collector = Collector(n_envs=n_envs, grid_size=grid_size, n_foods=n_foods, unit_size=unit_size, n_state_frames=n_state_frames, net=None, n_tsteps=n_tsteps, gamma=gamma, env_type=env_type, preprocessor=model.Model.preprocess)
+net = model.Model(collector.state_shape, action_space)
 dummy = net.forward(Variable(torch.zeros(2,*collector.state_shape)))
 collector.net = net
 updater = Updater(collector.net, lr, entropy_const=entropy_const, value_const=val_const, gamma=gamma, _lambda=_lambda, max_norm=max_norm)
+
 if resume:
     dummy = Variable(torch.ones(1,*collector.state_shape))
-    updater.net.calculate_grads(False)
+    updater.net.req_grads(False)
     updater.net.forward(dummy)
-    updater.net.calculate_grads(True)
+    updater.net.req_grads(True)
     updater.net.load_state_dict(torch.load(exp_name+'_net.p'))
     updater.optim.load_state_dict(torch.load(exp_name+'_optim.p'))
 updater.optim.zero_grad()
