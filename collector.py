@@ -15,8 +15,9 @@ class Collector():
         torch.FloatTensor = torch.cuda.FloatTensor
         torch.LongTensor = torch.cuda.LongTensor
 
-    def __init__(self, n_envs=1, grid_size=[15,15], n_foods=1, unit_size=10, n_state_frames=3, net=None, n_tsteps=15, gamma=0.99, env_type='snake-v0'):
+    def __init__(self, n_envs=1, grid_size=[15,15], n_foods=1, unit_size=10, n_state_frames=3, net=None, n_tsteps=15, gamma=0.99, env_type='snake-v0', preprocessor= lambda x: x):
 
+        self.preprocess = preprocessor
         self.n_envs = n_envs
         self.envs = [gym.make(env_type) for env in range(n_envs)]
         for i in range(n_envs):
@@ -54,12 +55,12 @@ class Collector():
                     the equation r(t) + gamma*V(t+1) - V(t)
         """
 
-        self.net.calculate_grads(False)
+        self.net.req_grads(False)
         self.net.train(mode=False)
         ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages = [], [], [], [], []
         for i in range(self.n_envs):
             ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages = self.rollout(i, ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages, render and i==0)
-        self.net.calculate_grads(True)
+        self.net.req_grads(True)
         self.net.train(mode=True)
         return np.asarray(ep_states,dtype=np.float32), ep_rewards, ep_dones, ep_actions, ep_advantages
 
@@ -168,22 +169,15 @@ class Collector():
         state = self.make_state(prepped_obs, prev_state)
         return state
 
-    def preprocess(self, pic, env_type='snake-v0'):
+    def preprocess(self, pic):
         """
         Each raw observation from the environment is run through this function.
         Put anything sort of preprocessing into this function.
+        This function is set in the intializer.
 
         pic - ndarray of an observation from the environment [H,W,C]
         """
-
-        if env_type == "snake-v0":
-            new_pic = np.zeros(pic.shape,dtype=np.float32)
-            new_pic[:,:,0][pic[:,:,0]==1] = 1
-            new_pic[:,:,0][pic[:,:,0]==255] = 1.5
-            new_pic[:,:,1][pic[:,:,1]==255] = 0
-            new_pic[:,:,2][pic[:,:,2]==255] = .3
-            pic = np.sum(new_pic, axis=-1)[None]
-        return pic.transpose((2,0,1))
+        pass
 
     def softmax(self, X, theta=1.0, axis=-1):
         """
