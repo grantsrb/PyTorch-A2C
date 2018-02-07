@@ -107,7 +107,7 @@ class Model(nn.Module):
             noise = Variable(noise)
         return x*noise
 
-    def calculate_grads(self, calc_bool):
+    def req_grads(self, calc_bool):
         """
         An on-off switch for the requires_grad parameter for each internal Parameter.
 
@@ -131,4 +131,4 @@ class Model(nn.Module):
             new_pic[:,:,1][pic[:,:,1]==255] = 0
             new_pic[:,:,2][pic[:,:,2]==255] = .3
             pic = np.sum(new_pic, axis=-1)
-        return pic[None].transpose((2,0,1))
+        return pic[None]
