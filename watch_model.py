@@ -37,7 +37,7 @@ collector = Collector(n_envs=1, grid_size=grid_size, n_foods=n_foods, unit_size=
 net = Model(collector.state_shape, action_space)
 collector.net = net
 dummy = Variable(torch.ones(1,*collector.state_shape))
-collector.net.calculate_grads(False)
+collector.net.req_grads(False)
 collector.net.forward(dummy)
 collector.net.train(mode=False)
 collector.net.load_state_dict(torch.load(file_name))
