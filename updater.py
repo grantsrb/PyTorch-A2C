@@ -15,7 +15,7 @@ class Updater():
 
     def __init__(self, net, lr, entropy_const=0.01, value_const=0.5, gamma=0.99, _lambda=0.98, max_norm=0.5):
         self.net = net
-        self.optim = optim.RMSprop(self.net.parameters(), lr=lr)
+        self.optim = optim.Adam(self.net.parameters(), lr=lr)
         self.global_loss = 0 # Used for efficiency in backprop
         self.entropy_const = entropy_const
         self.value_const = value_const
@@ -55,7 +55,7 @@ class Updater():
         except RuntimeError:
             print("Attempted to use self.global_loss.backward() when no graph is created yet!")
 
-    def calc_loss(self, states, rewards, dones, actions, advantages):
+    def calc_loss(self, states, rewards, dones, actions, advantages, gae=True):
         """
         This function accepts the data collected from a rollout, calculates the loss
         associated with the rollout, and then adds it to the global_loss.
@@ -74,10 +74,14 @@ class Updater():
         values, raw_pis = self.net.forward(states)
         softlog_pis = F.log_softmax(raw_pis, dim=-1)
         softlog_column = softlog_pis[list(range(softlog_pis.size(0))), actions]
-        advantages = self.discount(advantages, dones, self.gamma*self._lambda)
-        advantages = self.normalize(advantages)
-        pg_step = softlog_column*Variable(torch.FloatTensor(advantages))
-        pg_loss = -torch.mean(pg_step)
+        if gae:
+            advantages = self.discount(advantages, dones, self.gamma*self._lambda)
+        else:
+            disc_rewards = self.discount(rewards, dones, self.gamma)
+            advantages = (torch.FloatTensor(disc_rewards)-values.data)*(1-torch.FloatTensor(dones))
+            advantages = self.normalize(advantages)
+        pg_step = -softlog_column*Variable(torch.FloatTensor(advantages))
+        pg_loss = torch.mean(pg_step)
 
         value_targets = self.discount(rewards, dones, self.gamma)
         value_loss =self.value_const*F.mse_loss(values.squeeze(),Variable(torch.FloatTensor(value_targets)))
