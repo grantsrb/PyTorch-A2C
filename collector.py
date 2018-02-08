@@ -19,6 +19,7 @@ class Collector():
 
         self.preprocess = preprocessor
         self.n_envs = n_envs
+        self.env_type = env_type
         self.envs = [gym.make(env_type) for env in range(n_envs)]
         for i in range(n_envs):
             self.envs[i].grid_size = grid_size
@@ -114,14 +115,10 @@ class Collector():
 
         self.state_bookmarks[env_idx] = state
         if not done:
-            value, pi = self.net.forward(Variable(torch.FloatTensor(state).unsqueeze(0)))
-            value = value.squeeze().data[0]
-            advantage = self.temporal_difference(rewards[-1], value, last_value)
-            advantages.append(advantage)
-            rewards[-1] = value # Bootstrapped value
+            rewards[-1] = last_value # Bootstrapped value
             dones[-1] = True
-        else:
-            advantages.append(0)
+        advantage = self.temporal_difference(rewards[-1], 0, last_value)
+        advantages.append(advantage)
 
         return states, rewards, dones, actions, advantages
 
@@ -167,7 +164,7 @@ class Collector():
         if done:
             obs = self.envs[env_idx].reset()
             prev_state = None
-        prepped_obs = self.preprocess(obs, env_type)
+        prepped_obs = self.preprocess(obs, self.env_type)
         state = self.make_state(prepped_obs, prev_state)
         return state
 
