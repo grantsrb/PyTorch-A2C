@@ -26,18 +26,19 @@ class Collector():
             self.envs[i].unit_size = unit_size
 
         observations = [self.envs[i].reset() for i in range(n_envs)]
-        self.PREP_MEAN = np.mean(observations[0])
-        prepped_observations = [self.preprocess(obs) for obs in observations]
+        prepped_observations = [self.preprocess(obs, env_type) for obs in observations]
         self.prepped_shape = prepped_observations[0].shape
+        print("Prepped Shape:", self.prepped_shape)
         prepped_obs = prepped_observations[0] # Moves channels to first dimension
         self.state_shape = [n_state_frames*prepped_obs.shape[0],*prepped_obs.shape[1:]]
+        print("State Shape:", self.state_shape)
         self.state_bookmarks = [self.make_state(obs) for obs in prepped_observations]
 
         self.gamma = gamma
         self.net = net
         self.n_tsteps = n_tsteps
         self.T = 0
-        self.avg_reward = 0
+        self.avg_reward = -1
 
 
 
@@ -101,7 +102,8 @@ class Collector():
 
             value = value.squeeze().data[0]
             if i > 0:
-                advantage = self.temporal_difference(rewards[-1], value*(1-dones[-1]), last_value)
+                keep_val = (1-dones[-1])
+                advantage = self.temporal_difference(rewards[-1], value*keep_val, last_value*keep_val)
                 last_value = value
                 advantages.append(advantage)
             else:
@@ -114,12 +116,12 @@ class Collector():
         if not done:
             value, pi = self.net.forward(Variable(torch.FloatTensor(state).unsqueeze(0)))
             value = value.squeeze().data[0]
-            rewards[-1] = reward + self.gamma*value # Bootstrapped value
-            advantage = self.temporal_difference(rewards[-1], 0, last_value)
+            advantage = self.temporal_difference(rewards[-1], value, last_value)
             advantages.append(advantage)
+            rewards[-1] = value # Bootstrapped value
             dones[-1] = True
         else:
-            advantages.append(rewards[-1]-last_value)
+            advantages.append(0)
 
         return states, rewards, dones, actions, advantages
 
@@ -132,7 +134,7 @@ class Collector():
 
         action_ps = self.softmax(pi.numpy()).squeeze()
         action = np.random.choice(self.net.output_space, p=action_ps)
-        return action
+        return int(action)
 
     def make_state(self, prepped_obs, prev_state=None):
         """
@@ -165,7 +167,7 @@ class Collector():
         if done:
             obs = self.envs[env_idx].reset()
             prev_state = None
-        prepped_obs = self.preprocess(obs)
+        prepped_obs = self.preprocess(obs, env_type)
         state = self.make_state(prepped_obs, prev_state)
         return state
 
