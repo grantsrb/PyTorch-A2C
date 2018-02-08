@@ -25,7 +25,7 @@ class Model(nn.Module):
         self.value_out = nn.Linear(self.hidden_dim, 1)
 
     def forward(self, x, bnorm=True):
-        x.data[:,1,:] = -x.data[:,1,:]
+        x.data[:,1,:] = -.5*x.data[:,1,:]
         x = torch.sum(x.data, dim=1)
         fx = F.relu(self.entry(Variable(x)))
         if bnorm: fx = self.bnorm1(fx)
@@ -61,10 +61,10 @@ class Model(nn.Module):
             pic[pic == 109] = 0 # erase background (background type 2)
             pic[pic != 0] = 1 # everything else (paddles, ball) just set to 1
         elif env_type == "snake-v0":
-            new_pic = np.zeros(pic.shape,dtype=np.float32)
-            new_pic[:,:,0][pic[:,:,0]==1] = 1
-            new_pic[:,:,0][pic[:,:,0]==255] = 1.5
-            new_pic[:,:,1][pic[:,:,1]==255] = 0
-            new_pic[:,:,2][pic[:,:,2]==255] = .3
-            pic = np.sum(new_pic, axis=-1)
+            new_pic = np.zeros(pic.shape[:2],dtype=np.float32)
+            new_pic[:,:][pic[:,:,0]==1] = 1
+            new_pic[:,:][pic[:,:,0]==255] = 1.5
+            new_pic[:,:][pic[:,:,1]==255] = 0
+            new_pic[:,:][pic[:,:,2]==255] = .3
+            pic = new_pic
         return pic.ravel()[None]
