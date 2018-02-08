@@ -12,15 +12,16 @@ env_type = 'snake-v0'
 
 # Hyperparameters
 gamma = .99 # Reward discount factor
-_lambda = .98 # GAE moving average factor
-n_rollouts = 3 # Number of times to perform rollouts before updating model
-n_envs = 16 # Number of environments
-n_tsteps = 15 # Maximum number of steps to take in an environment for one episode
-val_const = .1 # Scales the value portion of the loss function
+_lambda = .97 # GAE moving average factor
+n_rollouts = 30 # Number of times to perform rollouts before updating model
+n_envs = 15 # Number of environments
+n_tsteps = 7 # Maximum number of steps to take in an environment for one episode
+val_const = .5 # Scales the value portion of the loss function
 entropy_const = 0.01 # Scales the entropy portion of the loss function
-max_norm = 0.4 # Scales the gradients using their norm
-lr = 1e-3 # Divide by batchsize as a shortcut to averaging the gradient over multiple batches
+max_norm = 0.5 # Scales the gradients using their norm
+lr = 1e-5 # Divide by batchsize as a shortcut to averaging the gradient over multiple batches
 n_state_frames = 2 # number of observations to stack for a single environment state
+gae = False
 
 # Environment Choices
 grid_size = [15,15]
@@ -53,9 +54,10 @@ if len(sys.argv) > 1:
         elif "test" in str_arg: test = True
         elif "resume" in str_arg: resume = True
         elif "render" in str_arg: render = True
+        elif "gae" in str_arg: gae = True
 
 print("Experiment Name:", exp_name)
-print("Env Name:", env_type)
+print("env_type:", env_type)
 print("gamma:", gamma)
 print("_lambda:", _lambda)
 print("n_rollouts:", n_rollouts)
@@ -73,6 +75,7 @@ print("lr:", lr)
 print("Test:", test)
 print("Resume:", resume)
 print("Render:", render)
+print("GAE:", gae)
 
 if test:
     net_save_file = "test_net.p"
@@ -105,7 +108,7 @@ while True:
     print("Begin Epoch", epoch, "– T =", collector.T)
     for rollout in range(n_rollouts):
         data = collector.get_data(render)
-        updater.calc_loss(*data)
+        updater.calc_loss(*data, gae)
     updater.update_model()
     updater.save_model(net_save_file, optim_save_file)
     updater.print_statistics()
