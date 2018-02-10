@@ -30,8 +30,7 @@ class Collector():
         prepped_observations = [self.preprocess(obs, env_type) for obs in observations]
         self.prepped_shape = prepped_observations[0].shape
         print("Prepped Shape:", self.prepped_shape)
-        prepped_obs = prepped_observations[0] # Moves channels to first dimension
-        self.state_shape = [n_state_frames*prepped_obs.shape[0],*prepped_obs.shape[1:]]
+        self.state_shape = [n_state_frames*self.prepped_shape[0],*self.prepped_shape[1:]]
         print("State Shape:", self.state_shape)
         self.state_bookmarks = [self.make_state(obs) for obs in prepped_observations]
 
@@ -40,8 +39,6 @@ class Collector():
         self.n_tsteps = n_tsteps
         self.T = 0
         self.avg_reward = -1
-
-
 
     def get_data(self, render=False):
         """
@@ -60,10 +57,12 @@ class Collector():
         self.net.req_grads(False)
         self.net.train(mode=False)
         ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages = [], [], [], [], []
+        data = ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages
         for i in range(self.n_envs):
-            ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages = self.rollout(i, ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages, render and i==0)
+            data = self.rollout(i, *data, render and i==0)
         self.net.req_grads(True)
         self.net.train(mode=True)
+        ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages = data
         return np.asarray(ep_states,dtype=np.float32), ep_rewards, ep_dones, ep_actions, ep_advantages
 
     def rollout(self, env_idx, states, rewards, dones, actions, advantages, render=False):
@@ -96,29 +95,30 @@ class Collector():
                 self.envs[env_idx].render(mode='human')
             self.T += 1
 
-            value, pi = self.net.forward(Variable(torch.FloatTensor(state).unsqueeze(0)))
+            value, pi = self.net.forward(Variable(torch.FloatTensor(state.copy()).unsqueeze(0)))
             action = self.get_action(pi.data)
-            obs, reward, done, info = self.envs[env_idx].step(action)
-            if reward is not 0: self.avg_reward = .99*self.avg_reward + 0.01*reward
+
+            obs, reward, done, info = self.envs[env_idx].step(action+2*(self.env_type == 'Pong-v0'))
+            reset = done # Used to prevent reset in pong environment before actual done signal
+            if reward != 0:
+                self.avg_reward = .99*self.avg_reward + 0.01*reward
+                if 'Pong-v0' == self.env_type: done = True
 
             value = value.squeeze().data[0]
             if i > 0:
-                keep_val = (1-dones[-1])
-                advantage = self.temporal_difference(rewards[-1], value*keep_val, last_value*keep_val)
-                last_value = value
+                keep_val = (1-dones[-1]) # If the previous step was a done, then current value is not used
+                advantage = rewards[-1] + self.gamma*value*keep_val - last_value
                 advantages.append(advantage)
-            else:
-                last_value = value
+            last_value = value
 
             states.append(state), rewards.append(reward), dones.append(done), actions.append(action)
-            state = self.next_state(env_idx, state, obs, done)
+            state = self.next_state(env_idx, state, obs, reset)
 
         self.state_bookmarks[env_idx] = state
         if not done:
-            rewards[-1] = last_value # Bootstrapped value
+            rewards[-1] = rewards[-1] + last_value # Bootstrapped value
             dones[-1] = True
-        advantage = self.temporal_difference(rewards[-1], 0, last_value)
-        advantages.append(advantage)
+        advantages.append(rewards[-1]-last_value)
 
         return states, rewards, dones, actions, advantages
 
@@ -149,7 +149,7 @@ class Collector():
         next_state = np.concatenate([prepped_obs, prev_state[:-prepped_obs.shape[0]]], axis=0)
         return next_state
 
-    def next_state(self, env_idx, prev_state, obs, done):
+    def next_state(self, env_idx, prev_state, obs, reset):
         """
         Get the next state of the environment corresponding to the env_idx.
 
@@ -157,11 +157,11 @@ class Collector():
         prev_state - ndarray of the state used in the most recent action
                     prediction
         obs - ndarray returned from the most recent step of the environment
-        done - boolean denoting the done signal from the most recent step of the
+        reset - boolean denoting the reset signal from the most recent step of the
                 environment
         """
 
-        if done:
+        if reset:
             obs = self.envs[env_idx].reset()
             prev_state = None
         prepped_obs = self.preprocess(obs, self.env_type)
