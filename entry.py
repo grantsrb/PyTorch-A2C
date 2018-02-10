@@ -23,6 +23,7 @@ max_norm = 0.4 # Scales the gradients using their norm
 lr = 1e-4/n_rollouts # Divide by batchsize as a shortcut to averaging the gradient over multiple batches
 n_state_frames = 2 # number of observations to stack for a single environment state
 gae = True
+reinforce = False
 norm_advs = False # Boolean that will normalize the advantages if true
 view_net_input = False # Boolean to watch the actual input to the neural net
 
@@ -60,6 +61,8 @@ if len(sys.argv) > 1:
         elif "render" in str_arg: render = True
         elif "gae=False" in str_arg: gae = False
         elif "gae=True" in str_arg: gae = True
+        elif "reinforce=False" in str_arg: reinforce = False
+        elif "reinforce=True" in str_arg: reinforce = True
         elif "norm_advs=False" in str_arg: norm_advs = False
         elif "norm_advs=True" in str_arg: norm_advs = True
         elif "view_net_input" in str_arg: view_net_input = True
@@ -69,6 +72,8 @@ if env_type == 'snake-v0':
 elif env_type == 'Pong-v0':
     action_space = 2
 
+if reinforce and gae:
+    print("GAE will take precedence over REINFORCE in model updates.\nREINFORCE is effectively False.")
 
 print("Experiment Name:", exp_name)
 print("env_type:", env_type)
@@ -91,6 +96,7 @@ print("Test:", test)
 print("Resume:", resume)
 print("Render:", render)
 print("GAE:", gae)
+print("REINFORCE:", reinforce)
 
 if test:
     net_save_file = "test_net.p"
@@ -119,7 +125,7 @@ while True:
     print("Begin Epoch", epoch, "– T =", collector.T)
     for rollout in range(n_rollouts):
         data = collector.get_data(render)
-        updater.calc_loss(*data, gae)
+        updater.calc_loss(*data, gae, reinforce)
     updater.update_model()
     updater.save_model(net_save_file, optim_save_file)
     updater.print_statistics()
