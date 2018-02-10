@@ -9,21 +9,28 @@ Simple, sequential convolutional net.
 '''
 
 class Model(nn.Module):
-    def __init__(self, input_space, output_space):
+    def __init__(self, input_space, output_space, env_type='snake-v0', view_net_input=False):
         super(Model, self).__init__()
 
         self.input_space = input_space
         self.output_space = output_space
+        self.env_type=env_type
 
         self.convs = nn.ModuleList([])
         self.dropouts = nn.ModuleList([]) # Used in dense block
 
         self.conv1 = self.conv_block(input_space[-3],8)
         self.convs.append(self.conv1)
-        self.conv2 = self.conv_block(8, 8, stride=2, bnorm=True)
+        self.conv2 = self.conv_block(8, 8, bnorm=True)
         self.convs.append(self.conv2)
-        self.conv3 = self.conv_block(8, 12, bnorm=True)
+        self.conv3 = self.conv_block(8, 8, bnorm=True)
         self.convs.append(self.conv3)
+        self.conv4 = self.conv_block(8, 12, bnorm=True)
+        self.convs.append(self.conv4)
+        self.conv5 = self.conv_block(12, 12, stride=2, bnorm=True)
+        self.convs.append(self.conv5)
+        self.conv6 = self.conv_block(12, 12, stride=2, bnorm=True)
+        self.convs.append(self.conv6)
 
         self.features = nn.Sequential(*self.convs)
         self.classifier = None
