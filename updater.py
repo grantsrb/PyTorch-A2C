@@ -54,7 +54,7 @@ class Updater():
         except RuntimeError:
             print("Attempted to use self.global_loss.backward() when no graph is created yet!")
 
-    def calc_loss(self, states, rewards, dones, actions, advantages, gae=True):
+    def calc_loss(self, states, rewards, dones, actions, advantages, gae=True, reinforce=False):
         """
         This function accepts the data collected from a rollout, calculates the loss
         associated with the rollout, and then adds it to the global_loss.
@@ -69,6 +69,11 @@ class Updater():
                 indexes taken in the rollout
         advantages - python float list denoting the tempotal difference
                     at each step in the rollout
+        gae - boolean denoting whether generalized advantage estimation should 
+                be used.
+        reinforce - boolean denoting whether REINFORCE stype updates should 
+                be used. gae takes precedence over reinforce.
+
         """
 
         states = Variable(torch.from_numpy(states))
@@ -78,6 +83,9 @@ class Updater():
         if gae:
             advantages = self.discount(advantages, dones, self.gamma*self._lambda)
             advantages = torch.FloatTensor(advantages)
+        elif reinforce:
+            disc_rewards = self.discount(rewards, dones, self.gamma)
+            advantages = torch.FloatTensor(disc_rewards)
         else:
             disc_rewards = self.discount(rewards, dones, self.gamma)
             advantages = (torch.FloatTensor(disc_rewards)-values.data)*(1-torch.FloatTensor(dones))
