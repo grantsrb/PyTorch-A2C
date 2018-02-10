@@ -13,7 +13,7 @@ class Updater():
     calc_gradients followed by update_model. If the size of the epoch is restricted by the memory, you can call calc_gradients to clear the graph.
     """
 
-    def __init__(self, net, lr, entropy_const=0.01, value_const=0.5, gamma=0.99, _lambda=0.98, max_norm=0.5):
+    def __init__(self, net, lr, entropy_const=0.01, value_const=0.5, gamma=0.99, _lambda=0.98, max_norm=0.5, norm_advs=False):
         self.net = net
         self.optim = optim.Adam(self.net.parameters(), lr=lr)
         self.global_loss = 0 # Used for efficiency in backprop
@@ -22,6 +22,7 @@ class Updater():
         self.gamma = gamma
         self._lambda = _lambda
         self.max_norm = max_norm
+        self.norm_advs = norm_advs
 
         # Tracking variables
         self.pg_loss = 0
@@ -40,13 +41,11 @@ class Updater():
 
         try:
             self.global_loss.backward()
-            self.norm = nn.utils.clip_grad_norm(self.net.parameters(), self.max_norm)
             if self.loss_count > 0:
                 self.info = {"Global Loss":self.global_loss.data[0]/self.loss_count,
                             "Policy Loss":self.pg_loss/self.loss_count,
                             "Value Loss":self.value_loss/self.loss_count,
-                            "Entropy":self.entropy/self.loss_count,
-                            "Norm":self.norm}
+                            "Entropy":self.entropy/self.loss_count}
             self.global_loss = 0
             self.pg_loss = 0
             self.value_loss = 0
@@ -60,34 +59,38 @@ class Updater():
         This function accepts the data collected from a rollout, calculates the loss
         associated with the rollout, and then adds it to the global_loss.
 
-        states - torch FloatTensor of the environment states from the rollouts
+        states - float32 ndarray of the environment states from the rollouts
                 shape = (n_states, *state_shape)
-        rewards - torch FloatTensor of rewards from the rollouts
+        rewards - python list of rewards from the rollouts
                 shape = (n_states,)
-        dones - torch FloatTensor of done signals from the rollouts
+        dones - python list of done signals from the rollouts
                 dones = (n_states,)
-        actions - torch LongTensor or python integer list denoting the actual action
+        actions - python integer list denoting the actual action
                 indexes taken in the rollout
+        advantages - python float list denoting the tempotal difference
+                    at each step in the rollout
         """
 
-        states = Variable(torch.FloatTensor(states))
+        states = Variable(torch.from_numpy(states))
         values, raw_pis = self.net.forward(states)
         softlog_pis = F.log_softmax(raw_pis, dim=-1)
         softlog_column = softlog_pis[list(range(softlog_pis.size(0))), actions]
         if gae:
             advantages = self.discount(advantages, dones, self.gamma*self._lambda)
+            advantages = torch.FloatTensor(advantages)
         else:
             disc_rewards = self.discount(rewards, dones, self.gamma)
             advantages = (torch.FloatTensor(disc_rewards)-values.data)*(1-torch.FloatTensor(dones))
+        if self.norm_advs or not gae:
             advantages = self.normalize(advantages)
-        pg_step = -softlog_column*Variable(torch.FloatTensor(advantages))
-        pg_loss = torch.mean(pg_step)
+        pg_step = softlog_column*Variable(advantages)
+        pg_loss = -torch.mean(pg_step)
 
-        value_targets = self.discount(rewards, dones, self.gamma)
-        value_loss =self.value_const*F.mse_loss(values.squeeze(),Variable(torch.FloatTensor(value_targets)))
+        value_targets = torch.FloatTensor(self.discount(rewards, dones, self.gamma))
+        value_loss = self.value_const*F.mse_loss(values.squeeze(),Variable(value_targets))
 
         softmaxes = F.softmax(raw_pis, dim=-1)
-        entropy_step = softmaxes*softlog_pis
+        entropy_step = torch.sum(softmaxes*softlog_pis, dim=-1)
         entropy = -self.entropy_const*torch.mean(entropy_step)
 
         self.global_loss += pg_loss + value_loss - entropy
@@ -108,7 +111,7 @@ class Updater():
         """
 
         running_sum = 0
-        discounts = np.zeros(len(array))
+        discounts = [0]*len(array)
         for i in reversed(range(len(array))):
             if mask[i] == 1: running_sum = 0
             running_sum = array[i] + discount_factor*running_sum
@@ -127,6 +130,8 @@ class Updater():
               normalization. If None, the standard deviation will be
               calculated from the array.
         """
+
+        assert type(array) == type(np.array([])) or type(array) == type(torch.FloatTensor([]))
 
         if mean is None:
             if type(array) == type(np.array([])):
@@ -160,6 +165,7 @@ class Updater():
         """
 
         self.calc_gradients()
+        self.norm = nn.utils.clip_grad_norm(self.net.parameters(), self.max_norm)
 
         self.optim.step()
         self.optim.zero_grad()
