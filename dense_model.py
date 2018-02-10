@@ -4,13 +4,14 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import numpy as np
 import os
+import matplotlib.pyplot as plt
 
 """
 Description: A simple feedforward model with batchnorm.
 """
 
 class Model(nn.Module):
-    def __init__(self, input_space, output_space):
+    def __init__(self, input_space, output_space, env_type='snake-v0', view_net_input=False):
         super(Model, self).__init__()
         self.hidden_dim = 200
         self.input_space = input_space
@@ -24,13 +25,30 @@ class Model(nn.Module):
         self.action_out = nn.Linear(self.hidden_dim, output_space)
         self.value_out = nn.Linear(self.hidden_dim, 1)
 
-    def forward(self, x, bnorm=True):
+        self.env_type = env_type
+        if env_type == "Pong-v0":
+            self.view_shape = (80,80)
+        else:
+            self.view_shape = (60,60)
+        self.view_net_input = view_net_input
+        self.viewer = None
+
+    def forward(self, x):
+
         x.data[:,1,:] = -.5*x.data[:,1,:]
-        x = torch.sum(x.data, dim=1)
-        fx = F.relu(self.entry(Variable(x)))
-        if bnorm: fx = self.bnorm1(fx)
+        fx = x.data[:,0,:] - .5*x.data[:,1,:]
+        if self.view_net_input:
+            if self.viewer is None and x.shape[0] == 1:
+                self.viewer  = plt.imshow(fx.numpy().reshape(self.view_shape))
+            elif x.shape[0] == 1:
+                self.viewer.set_data(fx.numpy().reshape(self.view_shape))
+                plt.pause(0.5)
+                plt.draw()
+
+        fx = F.relu(self.entry(Variable(fx)))
+        fx = self.bnorm1(fx)
         fx = F.relu(self.hidden(fx))
-        if bnorm: fx = self.bnorm2(fx)
+        fx = self.bnorm2(fx)
         action = self.action_out(fx)
         value = self.value_out(fx)
         return value, action
@@ -41,7 +59,7 @@ class Model(nn.Module):
         """
         for param in self.parameters():
             if torch.sum(param.data != param.data) > 0:
-                print(param)
+                print("NaNs in Grad!")
 
     def req_grads(self, grad_on):
         """
@@ -65,6 +83,6 @@ class Model(nn.Module):
             new_pic[:,:][pic[:,:,0]==1] = 1
             new_pic[:,:][pic[:,:,0]==255] = 1.5
             new_pic[:,:][pic[:,:,1]==255] = 0
-            new_pic[:,:][pic[:,:,2]==255] = .3
+            new_pic[:,:][pic[:,:,2]==255] = .33
             pic = new_pic
         return pic.ravel()[None]
