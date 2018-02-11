@@ -69,9 +69,9 @@ class Updater():
                 indexes taken in the rollout
         advantages - python float list denoting the tempotal difference
                     at each step in the rollout
-        gae - boolean denoting whether generalized advantage estimation should 
+        gae - boolean denoting whether generalized advantage estimation should
                 be used.
-        reinforce - boolean denoting whether REINFORCE stype updates should 
+        reinforce - boolean denoting whether REINFORCE stype updates should
                 be used. gae takes precedence over reinforce.
 
         """
