@@ -1,6 +1,6 @@
 import sys
 from collector import Collector
-from model import Model
+import dense_model as model
 import torch
 from torch.autograd import Variable
 
@@ -24,6 +24,8 @@ if len(sys.argv) > 2:
         if "n_state_frames=" in str_arg: n_state_frames= int(str_arg[len('n_state_frames='):])
         if "env_type=" in str_arg: env_type = str_arg[len('env_type='):]
 
+if env_type == 'Pong-v0':
+    action_space = 2
 
 print("file_name:", file_name)
 print("n_state_frames:", n_state_frames)
@@ -33,15 +35,14 @@ print("unit_size:", unit_size)
 print("env_type:", env_type)
 
 
-collector = Collector(n_envs=1, grid_size=grid_size, n_foods=n_foods, unit_size=unit_size, n_state_frames=n_state_frames, net=None, n_tsteps=30, gamma=0, env_type=env_type)
-net = Model(collector.state_shape, action_space)
+collector = Collector(n_envs=1, grid_size=grid_size, n_foods=n_foods, unit_size=unit_size, n_state_frames=n_state_frames, net=None, n_tsteps=30, gamma=0, env_type=env_type, preprocessor=model.Model.preprocess)
+net = model.Model(collector.state_shape, action_space, env_type=env_type)
 collector.net = net
-dummy = Variable(torch.ones(1,*collector.state_shape))
-collector.net.req_grads(False)
+dummy = Variable(torch.ones(2,*collector.state_shape))
 collector.net.forward(dummy)
-collector.net.train(mode=False)
 collector.net.load_state_dict(torch.load(file_name))
-print(collector.net.flat_shape)
+collector.net.train(mode=False)
+collector.net.req_grads(False)
 
 while True:
-    data = collector.get_data(True)
+    data = collector.get_data(render=True)
