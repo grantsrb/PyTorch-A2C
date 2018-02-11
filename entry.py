@@ -109,6 +109,9 @@ else:
 
 
 collector = Collector(n_envs=n_envs, grid_size=grid_size, n_foods=n_foods, unit_size=unit_size, n_state_frames=n_state_frames, net=None, n_tsteps=n_tsteps, gamma=gamma, env_type=env_type, preprocessor=model.Model.preprocess)
+print("Obs Shape:,",collector.obs_shape)
+print("Prep Shape:,",collector.prepped_shape)
+print("State Shape:,",collector.state_shape)
 net = model.Model(collector.state_shape, action_space, env_type=env_type, view_net_input=view_net_input)
 dummy = net.forward(Variable(torch.zeros(2,*collector.state_shape)))
 collector.net = net
