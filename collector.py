@@ -28,10 +28,9 @@ class Collector():
 
         observations = [self.envs[i].reset() for i in range(n_envs)]
         prepped_observations = [self.preprocess(obs, env_type) for obs in observations]
+        self.obs_shape = observations[0].shape
         self.prepped_shape = prepped_observations[0].shape
-        print("Prepped Shape:", self.prepped_shape)
         self.state_shape = [n_state_frames*self.prepped_shape[0],*self.prepped_shape[1:]]
-        print("State Shape:", self.state_shape)
         self.state_bookmarks = [self.make_state(obs) for obs in prepped_observations]
 
         self.gamma = gamma
