@@ -34,8 +34,6 @@ class Model(nn.Module):
         self.viewer = None
 
     def forward(self, x):
-
-        x.data[:,1,:] = -.5*x.data[:,1,:]
         fx = x.data[:,0,:] - .5*x.data[:,1,:]
         if self.view_net_input:
             if self.viewer is None and x.shape[0] == 1:
