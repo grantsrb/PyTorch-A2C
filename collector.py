@@ -1,9 +1,12 @@
 import gym
-import gym_snake
 import torch
 import numpy as np
 from torch.autograd import Variable
 import matplotlib.pyplot as plt
+try:
+    import gym_snake
+except ImportError:
+    print("You have not installed gym-snake! Do not try to use env_type=\'snake-v0\'")
 
 
 class Collector():
