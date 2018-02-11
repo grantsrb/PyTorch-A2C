@@ -18,7 +18,7 @@ class Collector():
         torch.FloatTensor = torch.cuda.FloatTensor
         torch.LongTensor = torch.cuda.LongTensor
 
-    def __init__(self, n_envs=1, grid_size=[15,15], n_foods=1, unit_size=10, n_state_frames=3, net=None, n_tsteps=15, gamma=0.99, env_type='snake-v0', preprocessor= lambda x: x):
+    def __init__(self, n_envs=1, grid_size=[15,15], n_foods=1, unit_size=10, n_obs_stack=3, net=None, n_tsteps=15, gamma=0.99, env_type='snake-v0', preprocessor= lambda x: x):
 
         self.preprocess = preprocessor
         self.n_envs = n_envs
@@ -28,12 +28,13 @@ class Collector():
             self.envs[i].grid_size = grid_size
             self.envs[i].n_foods = n_foods
             self.envs[i].unit_size = unit_size
+        self.action_space = self.envs[0].action_space.n
 
         observations = [self.envs[i].reset() for i in range(n_envs)]
         prepped_observations = [self.preprocess(obs, env_type) for obs in observations]
         self.obs_shape = observations[0].shape
         self.prepped_shape = prepped_observations[0].shape
-        self.state_shape = [n_state_frames*self.prepped_shape[0],*self.prepped_shape[1:]]
+        self.state_shape = [n_obs_stack*self.prepped_shape[0],*self.prepped_shape[1:]]
         self.state_bookmarks = [self.make_state(obs) for obs in prepped_observations]
 
         self.gamma = gamma
@@ -132,7 +133,7 @@ class Collector():
         """
 
         action_ps = self.softmax(pi.numpy()).squeeze()
-        action = np.random.choice(self.net.output_space, p=action_ps)
+        action = np.random.choice(self.action_space, p=action_ps)
         return int(action)
 
     def make_state(self, prepped_obs, prev_state=None):

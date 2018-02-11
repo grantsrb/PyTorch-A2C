@@ -16,7 +16,7 @@ class UpdaterTests(unittest.TestCase):
     grid_size=[15,15]
     n_foods=1
     unit_size=10
-    n_state_frames=2
+    n_obs_stack=2
     n_tsteps=15
     action_space = 4
     gamma = .99
@@ -36,7 +36,7 @@ class UpdaterTests(unittest.TestCase):
         net = Model(self.state_shape, self.action_space, env_type='snake-v0')
         _,__ = net.forward(Variable(self.test_data))
         net.load_state_dict(updater.net.state_dict())
-        
+
         for p1,p2 in zip(updater.net.named_parameters(), net.named_parameters()):
             self.assertTrue(np.array_equal(p1[1].data.numpy(), p2[1].data.numpy()))
 
