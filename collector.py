@@ -29,6 +29,8 @@ class Collector():
             self.envs[i].n_foods = n_foods
             self.envs[i].unit_size = unit_size
         self.action_space = self.envs[0].action_space.n
+        if env_type == 'Pong-v0':
+            self.action_space = 2
 
         observations = [self.envs[i].reset() for i in range(n_envs)]
         prepped_observations = [self.preprocess(obs, env_type) for obs in observations]
