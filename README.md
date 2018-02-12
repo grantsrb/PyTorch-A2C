@@ -39,7 +39,7 @@ This will run a training session with the name `default`. As such, it will save 
 After training your policy, you can watch the policy in action using the `watch_model.py` file. To use this file, pass the name of the PyTorch state dict that you would like to view as the first command line argument and then specify the environment type using `env_type=<name_of_gym_environment>`. Make sure you are using the correct policy file by changing the 11th line of code from the current file to the file your state dict was created from. This will not be necessary if you did not change the default policy.
 
 ### Command Line Arguments
-RL algorithms need tuning to be good. There are tons of hyperparameters that can potentially have a huge impact on the training of the algorithm. In order to help with automated hyperparameter tuning, this project offers a number of optional command line arguments. Each is set using `<argument_name>=<argument>` with no spaces. For example, if you wanted to set the variable n_envs (the number of environments) to 15, then you would use the following:
+RL algorithms need tuning to be good. There are tons of hyperparameters that can potentially have a huge impact on the training of the algorithm. In order to help with automated hyperparameter tuning, this project offers a number of optional command line arguments. Each is set using `<argument_name>=<argument>` with no spaces. For example, if you wanted to set the variable `n_envs` (the number of environments) to 15, then you would use the following:
 
   $ python entry.py n_envs=15
 
