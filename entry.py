@@ -17,7 +17,7 @@ env_type = 'snake-v0'
 # Hyperparameters
 gamma = .99 # Reward discount factor
 _lambda = .98 # GAE moving average factor
-n_rollouts = 30 # Number of times to perform rollouts before updating model
+n_rollouts = 3 # Number of times to perform rollouts before updating model
 n_envs = 15 # Number of environments
 n_tsteps = 15 # Maximum number of steps to take in an environment for one episode
 val_const = .5 # Scales the value portion of the loss function
@@ -88,7 +88,6 @@ print("grid_size:", grid_size)
 print("n_foods:", n_foods)
 print("unit_size:", unit_size)
 print("norm_advs:", norm_advs)
-print("Test:", test)
 print("Resume:", resume)
 print("Render:", render)
 print("GAE:", gae)
