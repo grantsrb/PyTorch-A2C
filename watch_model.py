@@ -1,5 +1,5 @@
 import sys
-from sequential_collector import Collector
+from debug_collector import Collector
 import torch
 from torch.autograd import Variable
 

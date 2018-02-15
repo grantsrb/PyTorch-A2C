@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from sequential_collector import Collector
+from debug_collector import Collector
 import torch
 import dense_model as model
 

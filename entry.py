@@ -11,7 +11,7 @@ import copy
 import time
 
 # Change your policy file here!
-import dense_model as model
+import conv_model as model
 print("Using dense_model as policy file.")
 
 if __name__ == '__main__':
