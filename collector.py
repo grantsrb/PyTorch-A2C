@@ -18,71 +18,52 @@ class Collector():
         torch.FloatTensor = torch.cuda.FloatTensor
         torch.LongTensor = torch.cuda.LongTensor
 
-    def __init__(self, n_envs=1, grid_size=[15,15], n_foods=1, unit_size=10, n_obs_stack=3, net=None, n_tsteps=15, gamma=0.99, env_type='snake-v0', preprocessor= lambda x: x):
+    def __init__(self, reward_q, grid_size=[15,15], n_foods=1, unit_size=10, n_obs_stack=2, net=None, n_tsteps=15, gamma=0.99, env_type='snake-v0', preprocessor= lambda x: x):
 
         self.preprocess = preprocessor
-        self.n_envs = n_envs
         self.env_type = env_type
-        self.envs = [gym.make(env_type) for env in range(n_envs)]
-        for i in range(n_envs):
-            self.envs[i].grid_size = grid_size
-            self.envs[i].n_foods = n_foods
-            self.envs[i].unit_size = unit_size
-        self.action_space = self.envs[0].action_space.n
+        self.env = gym.make(env_type)
+        self.env.grid_size = grid_size
+        self.env.n_foods = n_foods
+        self.env.unit_size = unit_size
+        self.action_space = self.env.action_space.n
         if env_type == 'Pong-v0':
             self.action_space = 2
 
-        observations = [self.envs[i].reset() for i in range(n_envs)]
-        prepped_observations = [self.preprocess(obs, env_type) for obs in observations]
-        self.obs_shape = observations[0].shape
-        self.prepped_shape = prepped_observations[0].shape
+        observation = self.env.reset()
+        prepped_obs = self.preprocess(observation, env_type)
+        self.obs_shape = observation.shape
+        self.prepped_shape = prepped_obs.shape
         self.state_shape = [n_obs_stack*self.prepped_shape[0],*self.prepped_shape[1:]]
-        self.state_bookmarks = [self.make_state(obs) for obs in prepped_observations]
+        self.state_bookmark = self.make_state(prepped_obs)
 
         self.gamma = gamma
         self.net = net
         self.n_tsteps = n_tsteps
-        self.T = 0
-        self.avg_reward = -1
+        self.reward_q = reward_q
 
-    def get_data(self, render=False):
+    def produce_data(self, data_q):
         """
         Used as the external call to get a rollout from each environment.
 
-        Returns python lists of the relavent data.
-        ep_states - ndarray with dimensions of [num_samples, *state_shape]
-        ep_rewards - python list of float values collected from rolling out the environments
-        ep_dones - python list of booleans denoting the end of an episode
-        ep_actions - python list of integers denoting the actual selected actions in the
-                    rollouts
-        ep_advantages - python list of floats denoting the td value error corresponding to
-                    the equation r(t) + gamma*V(t+1) - V(t)
+        Adds a tuple of data from a rollout to the process queue.
+        data_q - multiprocessing.Queue that stores data to train the policy.
         """
 
         self.net.req_grads(False)
         self.net.train(mode=False)
-        ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages = [], [], [], [], []
-        data = ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages
-        for i in range(self.n_envs):
-            data = self.rollout(i, *data, render and i==0)
-        self.net.req_grads(True)
-        self.net.train(mode=True)
-        ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages = data
-        return np.asarray(ep_states,dtype=np.float32), ep_rewards, ep_dones, ep_actions, ep_advantages
+        while True:
+            data = self.rollout()
+            data_q.put(data)
 
-    def rollout(self, env_idx, states, rewards, dones, actions, advantages, render=False):
+
+
+    def rollout(self):
         """
         Collects a rollout of n_tsteps in the given environment. The collected data
         are the states that were used to get the actions, the actions that
         were used to progress the environment, the rewards that were collected from
         the environment, and the done signals from the environment.
-
-        env_idx - integer index of the environment to be rolled out
-        states - python list of states accumulated during the current epoch
-        rewards - python list of rewards accumulated during the current epoch
-        dones - python list of dones accumulated during the current epoch
-        actions - python list of actions accumulated during the current epoch
-        advantages - python list of advantages accumulated during the current epoch
 
         Returns python lists of the relavent data.
         states - python list of all states collected in this rollout
@@ -94,20 +75,17 @@ class Collector():
                     the equation r(t) + gamma*V(t+1) - V(t)
         """
 
-        state = self.state_bookmarks[env_idx]
+        state = self.state_bookmark
+        states, rewards, dones, actions, advantages = [], [], [], [], []
         for i in range(self.n_tsteps):
-            if render:
-                self.envs[env_idx].render(mode='human')
-            self.T += 1
-
             value, pi = self.net.forward(Variable(torch.FloatTensor(state.copy()).unsqueeze(0)))
             action = self.get_action(pi.data)
 
-            obs, reward, done, info = self.envs[env_idx].step(action+2*(self.env_type == 'Pong-v0'))
+            obs, reward, done, info = self.env.step(action+2*(self.env_type == 'Pong-v0'))
             reset = done # Used to prevent reset in pong environment before actual done signal
             if reward != 0:
-                self.avg_reward = .99*self.avg_reward + 0.01*reward
                 if 'Pong-v0' == self.env_type: done = True
+                self.reward_q.put(.99*self.reward_q.get() + .01*reward)
 
             value = value.squeeze().data[0]
             if i > 0:
@@ -117,9 +95,9 @@ class Collector():
             last_value = value
 
             states.append(state), rewards.append(reward), dones.append(done), actions.append(action)
-            state = self.next_state(env_idx, state, obs, reset)
+            state = self.next_state(self.env, state, obs, reset)
 
-        self.state_bookmarks[env_idx] = state
+        self.state_bookmark = state
         if not done:
             rewards[-1] = rewards[-1] + last_value # Bootstrapped value
             dones[-1] = True
@@ -154,11 +132,11 @@ class Collector():
         next_state = np.concatenate([prepped_obs, prev_state[:-prepped_obs.shape[0]]], axis=0)
         return next_state
 
-    def next_state(self, env_idx, prev_state, obs, reset):
+    def next_state(self, env, prev_state, obs, reset):
         """
-        Get the next state of the environment corresponding to the env_idx.
+        Get the next state of the environment.
 
-        env_idx - integer index denoting environment of interest
+        env - environment of interest
         prev_state - ndarray of the state used in the most recent action
                     prediction
         obs - ndarray returned from the most recent step of the environment
@@ -167,7 +145,7 @@ class Collector():
         """
 
         if reset:
-            obs = self.envs[env_idx].reset()
+            obs = self.env.reset()
             prev_state = None
         prepped_obs = self.preprocess(obs, self.env_type)
         state = self.make_state(prepped_obs, prev_state)
@@ -203,14 +181,3 @@ class Collector():
         ax_sum = np.expand_dims(np.sum(X, axis = axis), axis)
         p = X / ax_sum
         return p
-
-    def temporal_difference(self, actual, next_pred, current_pred):
-        """
-        Calculates the temporal difference of two predictions.
-
-        actual - float referring to the actual thing (often the reward) collected at time t.
-        next_pred - float referring to the Q or val prediction of the next state
-        current_pred - float refferring to the current Q or val prediction
-        """
-
-        return actual + self.gamma*next_pred - current_pred
