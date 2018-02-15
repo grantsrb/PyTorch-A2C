@@ -7,6 +7,10 @@ import numpy as np
 import gc
 import resource
 
+"""
+This is a non-parallel implementation of A2C.
+"""
+
 # Change your policy file here!
 import dense_model as model
 print("Using dense_model as policy file.")
