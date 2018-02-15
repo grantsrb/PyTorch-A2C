@@ -22,16 +22,15 @@ if __name__ == '__main__':
     # Hyperparameters
     gamma = .99 # Reward discount factor
     _lambda = .98 # GAE moving average factor
-    max_tsteps = 10000000
-    n_envs = 15 # Number of environments
+    max_tsteps = 1000000
+    n_envs = 5 # Number of environments
     n_tsteps = 15 # Maximum number of steps to take in an environment for one episode
     n_rollouts = 3*n_envs # Number of times to perform rollouts before updating model
     val_const = .5 # Scales the value portion of the loss function
     entropy_const = 0.01 # Scales the entropy portion of the loss function
     max_norm = 0.4 # Scales the gradients using their norm
-    lr = 1e-4/n_rollouts # Divide by batchsize as a shortcut to averaging the gradient over multiple batches
+    lr = 1e-4
     n_obs_stack = 2 # number of observations to stack for a single environment state
-    update_count = 2
     gae = True
     reinforce = False
     norm_advs = False # Boolean that will normalize the advantages if true
@@ -60,7 +59,6 @@ if __name__ == '__main__':
             if "n_foods=" in str_arg: n_foods= int(str_arg[len('n_foods='):])
             if "unit_size=" in str_arg: unit_size= int(str_arg[len('unit_size='):])
             if "n_obs_stack=" in str_arg: n_obs_stack= int(str_arg[len('n_obs_stack='):])
-            if "update_count=" in str_arg: update_count= int(str_arg[len('update_count='):])
             if "env_type=" in str_arg: env_type = str_arg[len('env_type='):]
 
             if "exp_name=" in str_arg: exp_name= str_arg[len('exp_name='):]
@@ -92,7 +90,6 @@ if __name__ == '__main__':
     print("max_norm:", max_norm)
     print("lr:", lr)
     print("n_obs_stack:", n_obs_stack)
-    print("update_count:", update_count)
     print("grid_size:", grid_size)
     print("n_foods:", n_foods)
     print("unit_size:", unit_size)
@@ -107,13 +104,13 @@ if __name__ == '__main__':
     log_file = exp_name+"_log.txt"
 
     # Shared Data Objects
-    data_q = mp.Queue(n_rollouts*2)
+    data_q = mp.Queue(n_rollouts)
     reward_q = mp.Queue(1)
     reward_q.put(torch.FloatTensor([-1]).share_memory_())
 
     collectors = []
     for i in range(n_envs):
-        collector = Collector(reward_q, grid_size=grid_size, n_foods=n_foods, unit_size=unit_size, n_obs_stack=n_obs_stack, net=None, n_tsteps=n_tsteps, gamma=gamma, update_count=update_count, env_type=env_type, preprocessor=model.Model.preprocess)
+        collector = Collector(reward_q, grid_size=grid_size, n_foods=n_foods, unit_size=unit_size, n_obs_stack=n_obs_stack, net=None, n_tsteps=n_tsteps, gamma=gamma, env_type=env_type, preprocessor=model.Model.preprocess)
         collectors.append(collector)
 
     print("Obs Shape:,",collectors[0].obs_shape)
@@ -143,9 +140,11 @@ if __name__ == '__main__':
     epoch = 0
     T = 0
     while T < max_tsteps:
+        print("Begin Epoch", epoch, "– T =", T)
         basetime = time.time()
         epoch += 1
-        print("Begin Epoch", epoch, "– T =", T)
+
+        # Collect data
         ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages = [], [], [], [], []
         ep_data = [ep_states, ep_rewards, ep_dones, ep_actions, ep_advantages]
         for i in range(n_rollouts):
@@ -153,22 +152,27 @@ if __name__ == '__main__':
             for i in range(len(ep_data)):
                 ep_data[i] += data[i]
         T += len(ep_data[0])
-        ep_data[0] = np.asarray(ep_data[0], dtype=np.float32) # states need to be converted to single numpy array
+        ep_data[0] = np.asarray(ep_data[0], dtype=np.float32) # convert states to single numpy array
+
+        # Calculate the Loss and Update nets
         updater.calc_loss(*ep_data, gae, reinforce)
         updater.update_model()
-        net.load_state_dict(updater.net.state_dict())
         updater.save_model(net_save_file, optim_save_file)
+        net.load_state_dict(updater.net.state_dict()) # update all collector nets
+
+        # Print Epoch Data
         updater.print_statistics()
         print("Grad Norm:", updater.norm, "– Avg Action:", np.mean(ep_data[3]))
         avg_reward = reward_q.get()
         reward_q.put(avg_reward)
         print("Average Reward:", avg_reward[0], end='\n\n')
-        print("Execution Time:", time.time()-basetime)
 
         # Check for memory leaks
         gc.collect()
         max_mem_used = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        print("Time:", time.time()-basetime)
         print("Memory Used: {:.2f} memory\n".format(max_mem_used / 1024))
 
+    # Close processes
     for dp in data_producers:
         dp.terminate()
