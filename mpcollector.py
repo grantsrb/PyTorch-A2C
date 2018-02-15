@@ -18,7 +18,7 @@ class Collector():
         torch.FloatTensor = torch.cuda.FloatTensor
         torch.LongTensor = torch.cuda.LongTensor
 
-    def __init__(self, reward_q, grid_size=[15,15], n_foods=1, unit_size=10, n_obs_stack=2, net=None, n_tsteps=15, gamma=0.99, update_count=2, env_type='snake-v0', preprocessor= lambda x: x):
+    def __init__(self, reward_q, grid_size=[15,15], n_foods=1, unit_size=10, n_obs_stack=2, net=None, n_tsteps=15, gamma=0.99, env_type='snake-v0', preprocessor= lambda x: x):
 
         self.preprocess = preprocessor
         self.env_type = env_type
@@ -41,7 +41,6 @@ class Collector():
         self.net = net
         self.n_tsteps = n_tsteps
         self.reward_q = reward_q
-        self.update_count = update_count
 
     def produce_data(self, data_q):
         """
