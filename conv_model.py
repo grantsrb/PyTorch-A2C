@@ -17,20 +17,17 @@ class Model(nn.Module):
         self.env_type=env_type
 
         self.convs = nn.ModuleList([])
-        self.dropouts = nn.ModuleList([]) # Used in dense block
 
         self.conv1 = self.conv_block(input_space[-3],8)
         self.convs.append(self.conv1)
-        self.conv2 = self.conv_block(8, 8, bnorm=True)
+        self.conv2 = self.conv_block(8, 12, bnorm=True)
         self.convs.append(self.conv2)
-        self.conv3 = self.conv_block(8, 8, bnorm=True)
+        self.conv3 = self.conv_block(12, 16, bnorm=True)
         self.convs.append(self.conv3)
-        self.conv4 = self.conv_block(8, 12, bnorm=True)
+        self.conv4 = self.conv_block(16, 20, bnorm=True)
         self.convs.append(self.conv4)
-        self.conv5 = self.conv_block(12, 12, stride=2, bnorm=True)
+        self.conv5 = self.conv_block(20, 20, stride=2, bnorm=True)
         self.convs.append(self.conv5)
-        self.conv6 = self.conv_block(12, 12, stride=2, bnorm=True)
-        self.convs.append(self.conv6)
 
         self.features = nn.Sequential(*self.convs)
         self.classifier = None
@@ -56,11 +53,8 @@ class Model(nn.Module):
             block.append(nn.BatchNorm2d(chan_out))
         return nn.Sequential(*block)
 
-    def dense_block(self, chan_in, chan_out, dropout_p=0, activation="relu", batch_norm=True):
+    def dense_block(self, chan_in, chan_out, activation="relu", batch_norm=True):
         block = []
-        dropout = nn.Dropout(dropout_p)
-        block.append(dropout)
-        self.dropouts.append(dropout)
         block.append(nn.Linear(chan_in, chan_out))
         activation=activation.lower()
         if "relu" in activation:
@@ -136,6 +130,6 @@ class Model(nn.Module):
             new_pic[:,:][pic[:,:,0]==1] = 1
             new_pic[:,:][pic[:,:,0]==255] = 1.5
             new_pic[:,:][pic[:,:,1]==255] = 0
-            new_pic[:,:][pic[:,:,2]==255] = .3
+            new_pic[:,:][pic[:,:,2]==255] = .33
             pic = new_pic
         return pic[None]
