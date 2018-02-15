@@ -25,7 +25,7 @@ Then navigate to the top folder using
 
 Hopefully you have already installed all the appropriate dependencies. See the section called **Dependencies** for a list of required dependencies.
 
-From the top directory, the code can be immediately run on either the Pong-v0 or snake-v0 environments with good results. Simply run the command:
+From the top directory, the code can be immediately run on either the Pong-v0 or snake-v0 environments with good results. The code is compatible with all gym environments, but will not necessarily be tuned for good performance. Simply run the command:
 
     $ python entry.py env_type=Pong-v0
 
