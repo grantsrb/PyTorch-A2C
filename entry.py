@@ -125,7 +125,6 @@ if __name__ == '__main__':
     dummy = net.forward(Variable(torch.zeros(2,*collectors[0].state_shape)))
     if resume:
         net.load_state_dict(torch.load(net_save_file))
-        optim.load_state_dict(torch.load(optim_save_file))
     net = cuda_if(net)
     net.share_memory()
     target_net = copy.deepcopy(net)
@@ -137,6 +136,8 @@ if __name__ == '__main__':
         data_producer.start()
 
     updater = Updater(target_net, lr, entropy_const=entropy_const, value_const=val_const, gamma=gamma, _lambda=_lambda, max_norm=max_norm, norm_advs=norm_advs)
+    if resume:
+        updater.optim.load_state_dict(torch.load(optim_save_file))
 
     updater.optim.zero_grad()
     updater.net.train(mode=True)
