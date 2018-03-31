@@ -2,7 +2,7 @@ import gym
 import torch
 import numpy as np
 from torch.autograd import Variable
-import matplotlib.pyplot as plt
+
 try:
     import gym_snake
 except ImportError:
@@ -14,9 +14,15 @@ class Collector():
     This class handles the collection of data by interacting with the environments.
     """
 
-    if torch.cuda.is_available():
-        torch.FloatTensor = torch.cuda.FloatTensor
-        torch.LongTensor = torch.cuda.LongTensor
+    def cuda_if(self, tobj):
+        if torch.cuda.is_available():
+            tobj = tobj.cuda()
+        return tobj
+
+    def cpu_if(self, tobj):
+        if torch.cuda.is_available():
+            tobj = tobj.cpu()
+        return tobj
 
     def __init__(self, reward_q, grid_size=[15,15], n_foods=1, unit_size=10, n_obs_stack=2, net=None, n_tsteps=15, gamma=0.99, env_type='snake-v0', preprocessor= lambda x: x):
 
@@ -78,8 +84,9 @@ class Collector():
         state = self.state_bookmark
         states, rewards, dones, actions, advantages = [], [], [], [], []
         for i in range(self.n_tsteps):
-            value, pi = self.net.forward(Variable(torch.FloatTensor(state.copy()).unsqueeze(0)))
-            action = self.get_action(pi.data)
+            tstate = self.cuda_if(torch.FloatTensor(state.copy()).unsqueeze(0))
+            value, pi = self.net.forward(Variable(tstate))
+            action = self.get_action(self.cpu_if(pi.data))
 
             obs, reward, done, info = self.env.step(action+2*(self.env_type == 'Pong-v0'))
             reset = done # Used to prevent reset in pong environment before actual done signal
@@ -99,7 +106,9 @@ class Collector():
 
         self.state_bookmark = state
         if not done:
-            rewards[-1] = rewards[-1] + last_value # Bootstrapped value
+            tstate = self.cuda_if(torch.FloatTensor(state.copy()).unsqueeze(0))
+            value, pi = self.net.forward(Variable(tstate))
+            rewards[-1] = rewards[-1] + self.gamma*value.squeeze().data[0] # Bootstrapped value
             dones[-1] = True
         advantages.append(rewards[-1]-last_value)
 

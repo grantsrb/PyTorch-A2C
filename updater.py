@@ -13,9 +13,15 @@ class Updater():
     calc_gradients followed by update_model. If the size of the epoch is restricted by the memory, you can call calc_gradients to clear the graph.
     """
 
+    def cuda_if(self, tobj):
+        if torch.cuda.is_available():
+            tobj = tobj.cuda()
+        return tobj
+
     def __init__(self, net, lr, entropy_const=0.01, value_const=0.5, gamma=0.99, _lambda=0.98, max_norm=0.5, norm_advs=False):
         self.net = net
         self.optim = optim.Adam(self.net.parameters(), lr=lr)
+        #self.optim = self.cuda_if(self.optim)
         self.global_loss = 0 # Used for efficiency in backprop
         self.entropy_const = entropy_const
         self.value_const = value_const
@@ -76,25 +82,25 @@ class Updater():
 
         """
 
-        states = Variable(torch.from_numpy(states))
+        states = Variable(self.cuda_if(torch.from_numpy(states)))
         values, raw_pis = self.net.forward(states)
         softlog_pis = F.log_softmax(raw_pis, dim=-1)
         softlog_column = softlog_pis[list(range(softlog_pis.size(0))), actions]
         if gae:
             advantages = self.discount(advantages, dones, self.gamma*self._lambda)
-            advantages = torch.FloatTensor(advantages)
+            advantages = self.cuda_if(torch.FloatTensor(advantages))
         elif reinforce:
             disc_rewards = self.discount(rewards, dones, self.gamma)
-            advantages = torch.FloatTensor(disc_rewards)
+            advantages = self.cuda_if(torch.FloatTensor(disc_rewards))
         else:
             disc_rewards = self.discount(rewards, dones, self.gamma)
-            advantages = (torch.FloatTensor(disc_rewards)-values.data)*(1-torch.FloatTensor(dones))
+            advantages = (self.cuda_if(torch.FloatTensor(disc_rewards))-values.data)*(1-self.cuda_if(torch.FloatTensor(dones)))
         if self.norm_advs or not gae:
             advantages = self.normalize(advantages)
         pg_step = softlog_column*Variable(advantages)
         pg_loss = -torch.mean(pg_step)
 
-        value_targets = torch.FloatTensor(self.discount(rewards, dones, self.gamma))
+        value_targets = self.cuda_if(torch.FloatTensor(self.discount(rewards, dones, self.gamma)))
         value_loss = self.value_const*F.mse_loss(values.squeeze(),Variable(value_targets))
 
         softmaxes = F.softmax(raw_pis, dim=-1)

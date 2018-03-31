@@ -12,10 +12,16 @@ import time
 import dense_model as model
 print("Using dense_model as policy file.")
 
+def cuda_if(tobj):
+    if torch.cuda.is_available():
+        tobj = tobj.cuda()
+    return tobj
+
 if __name__ == '__main__':
+    mp.set_start_method('forkserver')
 
     exp_name = 'default'
-    env_type = 'snake-v0'
+    env_type = 'Pong-v0'
 
     # Hyperparameters
     gamma = .99 # Reward discount factor
@@ -104,7 +110,7 @@ if __name__ == '__main__':
     # Shared Data Objects
     data_q = mp.Queue(n_rollouts)
     reward_q = mp.Queue(1)
-    reward_q.put(torch.FloatTensor([-1]).share_memory_())
+    reward_q.put(-1)
 
     collectors = []
     for i in range(n_envs):
@@ -120,6 +126,7 @@ if __name__ == '__main__':
     if resume:
         net.load_state_dict(torch.load(net_save_file))
         optim.load_state_dict(torch.load(optim_save_file))
+    net = cuda_if(net)
     net.share_memory()
     target_net = copy.deepcopy(net)
     data_producers = []
@@ -163,7 +170,7 @@ if __name__ == '__main__':
         print("Grad Norm:", updater.norm, "– Avg Action:", np.mean(ep_data[3]))
         avg_reward = reward_q.get()
         reward_q.put(avg_reward)
-        print("Average Reward:", avg_reward[0], end='\n\n')
+        print("Average Reward:", avg_reward, end='\n\n')
 
         # Check for memory leaks
         gc.collect()
