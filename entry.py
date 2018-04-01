@@ -9,8 +9,8 @@ import resource
 import torch.multiprocessing as mp
 import copy
 import time
-import dense_model as model
-print("Using dense_model as policy file.")
+import dense_model
+import conv_model
 
 def cuda_if(tobj):
     if torch.cuda.is_available():
@@ -22,6 +22,7 @@ if __name__ == '__main__':
 
     exp_name = 'default'
     env_type = 'Pong-v0'
+    model_type = 'dense'
 
     # Hyperparameters
     gamma = .99 # Reward discount factor
@@ -34,11 +35,12 @@ if __name__ == '__main__':
     entropy_const = 0.01 # Scales the entropy portion of the loss function
     max_norm = 0.4 # Scales the gradients using their norm
     lr = 1e-4
-    n_obs_stack = 2 # number of observations to stack for a single environment state
+    n_obs_stack = 2 # number of observations to stack for a single environment state. Do not exceed 2 for dense model
     gae = True
     reinforce = False
     norm_advs = False # Boolean that will normalize the advantages if true
-    view_net_input = False # Boolean to watch the actual input to the neural net
+    bnorm = False # Use batch_norm in the model
+    
 
     # Environment Choices
     grid_size = [15,15]
@@ -55,6 +57,7 @@ if __name__ == '__main__':
             if "n_rollouts=" in str_arg: n_rollouts = int(str_arg[len("n_rollouts="):])
             if "n_envs=" in str_arg: n_envs = int(str_arg[len("n_envs="):])
             if "n_tsteps=" in str_arg: n_tsteps = int(str_arg[len("n_tsteps="):])
+            if "max_tsteps=" in str_arg: max_tsteps = int(str_arg[len("max_tsteps="):])
             if "val_const=" in str_arg: val_const = float(str_arg[len("val_const="):])
             if "entropy_const=" in str_arg: entropy_const = float(str_arg[len("entropy_const="):])
             if "max_norm=" in str_arg: max_norm = float(str_arg[len("max_norm="):])
@@ -66,6 +69,7 @@ if __name__ == '__main__':
             if "env_type=" in str_arg: env_type = str_arg[len('env_type='):]
 
             if "exp_name=" in str_arg: exp_name= str_arg[len('exp_name='):]
+            elif "model_type=" in str_arg: model_type= str_arg[len('model_type='):]
             elif "resume=False" in str_arg: resume = False
             elif "resume" in str_arg: resume = True
             elif "render=False" in str_arg: render = False
@@ -76,19 +80,21 @@ if __name__ == '__main__':
             elif "reinforce=True" in str_arg: reinforce = True
             elif "norm_advs=False" in str_arg: norm_advs = False
             elif "norm_advs=True" in str_arg: norm_advs = True
-            elif "view_net_input=False" in str_arg: view_net_input = False
-            elif "view_net_input" in str_arg: view_net_input = True
+            elif "bnorm=False" == str_arg: bnorm = False
+            elif "bnorm=True" == str_arg: bnorm = True
 
     if reinforce and gae:
         print("GAE will take precedence over REINFORCE in model updates.\nREINFORCE is effectively False.")
 
     print("Experiment Name:", exp_name)
+    print("model_type:", model_type)
     print("env_type:", env_type)
     print("gamma:", gamma)
     print("_lambda:", _lambda)
     print("n_rollouts:", n_rollouts)
     print("n_envs:", n_envs)
     print("n_tsteps:", n_tsteps)
+    print("max_tsteps:", max_tsteps)
     print("val_const:", val_const)
     print("entropy_const:", entropy_const)
     print("max_norm:", max_norm)
@@ -98,10 +104,16 @@ if __name__ == '__main__':
     print("n_foods:", n_foods)
     print("unit_size:", unit_size)
     print("norm_advs:", norm_advs)
+    print("bnorm:", bnorm)
     print("Resume:", resume)
     print("Render:", render)
     print("GAE:", gae)
     print("REINFORCE:", reinforce)
+
+    if model_type == 'dense':
+        Model = dense_model.Model
+    else:
+        Model = conv_model.Model
 
     net_save_file = exp_name+"_net.p"
     optim_save_file = exp_name+"_optim.p"
@@ -114,14 +126,14 @@ if __name__ == '__main__':
 
     collectors = []
     for i in range(n_envs):
-        collector = Collector(reward_q, grid_size=grid_size, n_foods=n_foods, unit_size=unit_size, n_obs_stack=n_obs_stack, net=None, n_tsteps=n_tsteps, gamma=gamma, env_type=env_type, preprocessor=model.Model.preprocess)
+        collector = Collector(reward_q, grid_size=grid_size, n_foods=n_foods, unit_size=unit_size, n_obs_stack=n_obs_stack, net=None, n_tsteps=n_tsteps, gamma=gamma, env_type=env_type, preprocessor=Model.preprocess)
         collectors.append(collector)
 
     print("Obs Shape:,",collectors[0].obs_shape)
     print("Prep Shape:,",collectors[0].prepped_shape)
     print("State Shape:,",collectors[0].state_shape)
 
-    net = model.Model(collectors[0].state_shape, collectors[0].action_space, env_type=env_type, view_net_input=view_net_input)
+    net = Model(collectors[0].state_shape, collectors[0].action_space, bnorm=bnorm)
     dummy = net.forward(Variable(torch.zeros(2,*collectors[0].state_shape)))
     if resume:
         net.load_state_dict(torch.load(net_save_file))
