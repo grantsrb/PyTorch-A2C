@@ -9,25 +9,23 @@ Simple, sequential convolutional net.
 '''
 
 class Model(nn.Module):
-    def __init__(self, input_space, output_space, env_type='snake-v0', view_net_input=False):
+    def __init__(self, input_space, output_space, bnorm=False):
         super(Model, self).__init__()
 
         self.input_space = input_space
         self.output_space = output_space
-        self.env_type=env_type
+        self.bnorm = bnorm
 
         self.convs = nn.ModuleList([])
 
-        self.conv1 = self.conv_block(input_space[-3],8)
+        self.conv1 = self.conv_block(input_space[-3], 12, ksize=9)
         self.convs.append(self.conv1)
-        self.conv2 = self.conv_block(8, 12, bnorm=True)
+        self.conv2 = self.conv_block(12, 24, bnorm=self.bnorm)
         self.convs.append(self.conv2)
-        self.conv3 = self.conv_block(12, 16, bnorm=True)
+        self.conv3 = self.conv_block(24, 24, stride=2, bnorm=self.bnorm)
         self.convs.append(self.conv3)
-        self.conv4 = self.conv_block(16, 20, bnorm=True)
+        self.conv4 = self.conv_block(24, 24, stride=2, bnorm=self.bnorm)
         self.convs.append(self.conv4)
-        self.conv5 = self.conv_block(20, 20, stride=2, bnorm=True)
-        self.convs.append(self.conv5)
 
         self.features = nn.Sequential(*self.convs)
         self.classifier = None
@@ -74,11 +72,10 @@ class Model(nn.Module):
         feats = feats.view(feats.size(0), -1)
         if self.classifier is None:
             self.flat_shape = feats.shape
-            modules = [self.dense_block(feats.size(1), 200, batch_norm=True)]
-            modules.append(self.dense_block(200, 200, batch_norm=True))
+            modules = [self.dense_block(feats.size(1), 100, batch_norm=self.bnorm)]
             self.precursor = nn.Sequential(*modules)
-            self.classifier = self.dense_block(200,self.output_space,activation="none",batch_norm=False)
-            self.evaluator = self.dense_block(200, 1, activation="none", batch_norm=False)
+            self.classifier = self.dense_block(100,self.output_space,activation="none",batch_norm=False)
+            self.evaluator = self.dense_block(100, 1, activation="none", batch_norm=False)
         feats = self.precursor(feats)
         return self.evaluator(feats), self.classifier(feats)
 
