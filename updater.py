@@ -3,7 +3,7 @@ from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 from utils import cuda_if, discount
-
+import torch.optim as optim 
 
 class Updater():
     """
@@ -31,9 +31,12 @@ class Updater():
                     "states" - MDP states at each timestep t
                             type: FloatTensor
                             shape: (n_states, *state_shape)
-                    "next_states" - MDP states at timestep t+1
+                    "deltas" - gae deltas collected at timestep t+1
                             type: FloatTensor
-                            shape: (n_states, *state_shape)
+                            shape: (n_states,)
+                    "h_states" - Recurrent states at timestep t+1
+                            type: FloatTensor
+                            shape: (n_states, h_size)
                     "rewards" - Collects float rewards collected at each timestep t
                             type: FloatTensor
                             shape: (n_states,)
@@ -46,45 +49,50 @@ class Updater():
         """
         hyps = self.hyps
         net = self.net
+        net.req_grads(True)
 
         states = shared_data['states']
-        next_states = shared_data['next_states']
         rewards = shared_data['rewards']
         dones = shared_data['dones']
         actions = shared_data['actions']
+        deltas = shared_data['deltas']
+        advs = cuda_if(discount(deltas.squeeze(), dones.squeeze(), hyps['gamma']*hyps['lambda_']))
 
         # Forward Pass
-        vals, logits = net(Variable(cuda_if(states)))
-        next_vals, _ = net(Variable(cuda_if(next_states)))
+        if 'h_states' in shared_data:
+            h_states = Variable(cuda_if(shared_data['h_states']))
+            vals, logits, _ = net(Variable(cuda_if(states)), h_states)
+        else:
+            vals, logits = net(Variable(cuda_if(states)))
 
         # Log Probabilities
         log_softs = F.log_softmax(logits, dim=-1)
         logprobs = log_softs[torch.arange(len(actions)).long(), actions]
 
-        # Advantages
-        advs = self.gae(rewards.squeeze(), vals.data.squeeze(), next_vals.data.squeeze(), dones.squeeze(), hyps['gamma'], hyps['lambda_'])
-        advs = (advs - advs.mean()) / (advs.std() + 1e-6)
-
         # Returns
         if hyps['use_nstep_rets']: 
-            returns = advantages + vals.data.squeeze()
+            returns = advs + vals.data.squeeze()
         else: 
             returns = cuda_if(discount(rewards.squeeze(), dones.squeeze(), hyps['gamma']))
+
+        # Advantages
+        if hyps['norm_advs']:
+            advs = (advs - advs.mean()) / (advs.std() + 1e-6)
         
         # A2C Losses
         pi_loss = -(logprobs.squeeze()*Variable(advs.squeeze())).mean()
         val_loss = hyps['val_coef']*F.mse_loss(vals.squeeze(), returns)
-        entr_loss = -hyps['entr_coef']*(log_softs*F.softmax(logits, dim=-1)).sum(-1).mean()
+        entr_loss = -hyps['entr_coef']*((log_softs*F.softmax(logits, dim=-1)).sum(-1)).mean()
 
         loss = pi_loss + val_loss - entr_loss
         loss.backward()
         self.norm = nn.utils.clip_grad_norm_(net.parameters(), hyps['max_norm'])
-        optimizer.step()
-        optimizer.zero_grad()
+        self.optim.step()
+        self.optim.zero_grad()
 
         self.info = {"Loss":loss.item(), "Pi_Loss":pi_loss.item(), 
                     "ValLoss":val_loss.item(), "Entropy":entr_loss.item(),
-                    "GradNorm":norm.item()}
+                    "GradNorm":self.norm.item()}
         return self.info
 
     def gae(self, rewards, values, next_vals, dones, gamma, lambda_):

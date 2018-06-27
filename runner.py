@@ -22,10 +22,12 @@ class Runner:
                 tensor contains indices from idx*n_tsteps to (idx+1)*n_tsteps
                 Keys (assume string keys):
                     "states" - Collects the MDP states at each timestep t
-                    "next_states" - Collects the MDP states at timestep t+1
+                    "deltas" - Collects the gae deltas at timestep t+1
                     "rewards" - Collects float rewards collected at each timestep t
                     "dones" - Collects the dones collected at each timestep t
                     "actions" - Collects actions performed at each timestep t
+                    If Using Recurrent Model:
+                        "h_states" - Collects recurrent states at each timestep t
         gate_q - multiprocessing queue. Allows main process to control when
                 rollouts should be collected.
         stop_q - multiprocessing queue. Used to indicate to main process that
@@ -57,8 +59,11 @@ class Runner:
         state = next_state(self.env, self.obs_deque, obs=None, reset=True,
                                         preprocess=self.hyps['preprocess'])
         self.state_bookmark = state
+        self.h_bookmark = None
+        if self.net.is_recurrent:
+            self.h_bookmark = Variable(cuda_if(torch.zeros(1, self.net.h_size)))
         self.ep_rew = 0
-        self.net.train(mode=False) # fixes potential batchnorm and dropout issues
+        #self.net.train(mode=False) # fixes potential batchnorm and dropout issues
         for p in self.net.parameters(): # Turn off gradient collection
             p.requires_grad = False
         while True:
@@ -86,11 +91,19 @@ class Runner:
                     "preprocess" - function to preprocess raw observations
         """
         state = self.state_bookmark
+        h = self.h_bookmark
         n_tsteps = hyps['n_tsteps']
         startx = idx*n_tsteps
+        prev_val = None
         for i in range(n_tsteps):
             self.datas['states'][startx+i] = cuda_if(torch.FloatTensor(state))
-            val, logits = net(Variable(self.datas['states'][startx+i]).unsqueeze(0))
+            state_in = Variable(self.datas['states'][startx+i]).unsqueeze(0)
+            if 'h_states' in self.datas:
+                self.datas['h_states'][startx+i] = h.data[0]
+                h_in = Variable(h.data)
+                val, logits, h = net(state_in, h_in)
+            else:
+                val, logits = net(state_in)
             probs = F.softmax(logits, dim=-1)
             action = sample_action(probs.data)
             action = int(action.item())
@@ -102,19 +115,33 @@ class Runner:
             if done:
                 self.rew_q.put(.99*self.rew_q.get() + .01*self.ep_rew)
                 self.ep_rew = 0
+                # Reset Recurrence
+                if h is not None:
+                    h = Variable(cuda_if(torch.zeros(1,self.net.h_size)))
 
             self.datas['rewards'][startx+i] = rew
             self.datas['dones'][startx+i] = float(done)
             self.datas['actions'][startx+i] = action
             state = next_state(self.env, self.obs_deque, obs=obs, reset=reset, 
-                                            preprocess=hyps['preprocess'])
+                                                preprocess=hyps['preprocess'])
             if i > 0:
-                self.datas['next_states'][startx+i-1] = self.datas['states'][startx+i]
+                prev_rew = self.datas['rewards'][startx+i-1]
+                prev_done = self.datas['dones'][startx+i-1]
+                delta = prev_rew + hyps['gamma']*val.data*(1-prev_done) - prev_val
+                self.datas['deltas'][startx+i-1] = delta
+            prev_val = val.data.squeeze()
 
+        # Funky bootstrapping
         endx = startx+n_tsteps-1
-        self.datas['next_states'][endx] = cuda_if(torch.FloatTensor(state))
         if not done:
-            val, logits = net(Variable(self.datas['next_states'][endx]).unsqueeze(0))
-            self.datas['rewards'][endx] += hyps['gamma']*val.squeeze()
+            state_in = Variable(cuda_if(torch.FloatTensor(state))).unsqueeze(0)
+            if 'h_states' in self.datas:
+                val, logits, _ = net(state_in, Variable(h.data))
+            else:
+                val, logits = net(state_in)
+            self.datas['rewards'][endx] += hyps['gamma']*val.squeeze() # Bootstrap
             self.datas['dones'][endx] = 1.
+        self.datas['deltas'][endx] = self.datas['rewards'][endx] - prev_val
         self.state_bookmark = state
+        if h is not None:
+            self.h_bookmark = h.data
