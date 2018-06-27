@@ -3,12 +3,13 @@ from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from .gru import GRU
 
 '''
 Simple, sequential convolutional net.
 '''
 
-class ConvModel(nn.Module):
+class GRUModel(nn.Module):
 
     def cuda_if(self, tobj):
         if torch.cuda.is_available():
@@ -16,9 +17,9 @@ class ConvModel(nn.Module):
         return tobj
 
     def __init__(self, input_space, output_space, h_size=288, bnorm=False):
-        super(ConvModel, self).__init__()
+        super(GRUModel, self).__init__()
 
-        self.is_recurrent = False
+        self.is_recurrent = True
         self.input_space = input_space
         self.output_space = output_space
         self.h_size = h_size
@@ -62,14 +63,16 @@ class ConvModel(nn.Module):
                                             stride=stride, padding=padding, 
                                             bnorm=self.bnorm))
         shape = self.get_new_shape(shape, out_depth, ksize, padding=padding, stride=stride)
-        
+
         self.features = nn.Sequential(*self.convs)
         self.flat_size = int(np.prod(shape))
         print("Flat Features Size:", self.flat_size)
         self.resize_emb = nn.Sequential(nn.Linear(self.flat_size, self.h_size), nn.ReLU())
 
+        # GRU Unit
+        self.gru = GRU(x_size=self.h_size, h_size=self.h_size)
+
         # Policy
-        self.emb_bnorm = nn.BatchNorm1d(self.h_size)
         self.pi = nn.Linear(self.h_size, self.output_space)
         self.value = nn.Linear(self.h_size, 1)
 
@@ -82,32 +85,31 @@ class ConvModel(nn.Module):
     def new_size(self, shape, ksize, padding, stride):
         return (shape - ksize + 2*padding)//stride + 1
 
-    def forward(self, x):
+    def forward(self, x, old_h):
         embs = self.emb_net(x)
-        val, pi = self.policy(embs)
-        return val, pi
+        h = self.gru(embs, old_h)
+        val, pi = self.policy(h)
+        return val, pi, h
 
-    def emb_net(self, state):
+    def emb_net(self, mdp_state):
         """
-        Creates an embedding for the state.
+        Creates an embedding for the mdp_state.
 
-        state - Variable FloatTensor with shape (BatchSize, Channels, Height, Width)
+        mdp_state - Variable FloatTensor with shape (BatchSize, Channels, Height, Width)
         """
-        feats = self.features(state)
+        feats = self.features(mdp_state)
         feats = feats.view(feats.shape[0], -1)
         state_embs = self.resize_emb(feats)
         return state_embs
 
-    def policy(self, state_emb):
+    def policy(self, h):
         """
         Uses the state embedding to produce an action.
 
-        state_emb - the state embedding created by the emb_net
+        h - the state embedding created by the emb_net
         """
-        if self.bnorm:
-            state_emb = self.emb_bnorm(state_emb)
-        pi = self.pi(state_emb)
-        value = self.value(state_emb)
+        pi = self.pi(h)
+        value = self.value(h)
         return value, pi
 
     def conv_block(self, chan_in, chan_out, ksize=3, stride=1, padding=1, activation="lerelu", max_pool=False, bnorm=True):
@@ -129,48 +131,6 @@ class ConvModel(nn.Module):
         if bnorm:
             block.append(nn.BatchNorm2d(chan_out))
         return nn.Sequential(*block)
-
-    def dense_block(self, chan_in, chan_out, activation="relu", bnorm=True):
-        block = []
-        block.append(nn.Linear(chan_in, chan_out))
-        if activation is not None: activation=activation.lower()
-        if "relu" in activation:
-            block.append(nn.ReLU())
-        elif "elu" in activation:
-            block.append(nn.ELU())
-        elif "tanh" in activation:
-            block.append(nn.Tanh())
-        elif "lerelu" in activation:
-            block.append(nn.LeakyReLU())
-        elif "selu" in activation:
-            block.append(nn.SELU())
-        if bnorm:
-            block.append(nn.BatchNorm1d(chan_out))
-        return nn.Sequential(*block)
-
-    def add_noise(self, x, mean=0.0, std=0.01):
-        """
-        Adds a normal distribution over the entries in a matrix.
-        """
-        means = torch.zeros(*x.size()).float()
-        if mean != 0.0:
-            means = means + mean
-        noise = self.cuda_if(torch.normal(means,std=std))
-        if type(x) == type(Variable()):
-            noise = Variable(noise)
-        return x+noise
-
-    def multiply_noise(self, x, mean=1, std=0.01):
-        """
-        Multiplies a normal distribution over the entries in a matrix.
-        """
-        means = torch.zeros(*x.size()).float()
-        if mean != 0:
-            means = means + mean
-        noise = self.cuda_if(torch.normal(means,std=std))
-        if type(x) == type(Variable()):
-            noise = Variable(noise)
-        return x*noise
 
     def req_grads(self, calc_bool):
         """

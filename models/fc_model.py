@@ -13,6 +13,7 @@ class FCModel(nn.Module):
     def __init__(self, input_shape, output_space, h_size=200, bnorm=False):
         super(FCModel, self).__init__()
 
+        self.is_recurrent = False
         self.flat_size = np.prod(input_shape[-3:])
 
         block = [nn.Linear(self.flat_size, h_size)]

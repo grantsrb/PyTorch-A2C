@@ -5,12 +5,13 @@ import torch.nn.functional as F
 import numpy as np
 
 class A3CModel(nn.Module):
-    def __init__(self, input_space, output_space, emb_size=256, bnorm=False):
+    def __init__(self, input_space, output_space, h_size=256, bnorm=False):
         super(Model, self).__init__()
 
+        self.is_recurrent = False
         self.input_space = input_space
         self.output_space = output_space
-        self.emb_size = emb_size
+        self.h_size = h_size
 
         # Embedding Net
         self.convs = nn.ModuleList([])
@@ -25,12 +26,12 @@ class A3CModel(nn.Module):
 
         self.features = nn.Sequential(*self.convs)
         self.flat_size = int(np.prod(shape))
-        self.proj_matrx = nn.Linear(self.flat_size, self.emb_size)
+        self.proj_matrx = nn.Linear(self.flat_size, self.h_size)
 
         # Policy
-        self.emb_bnorm = nn.BatchNorm1d(self.emb_size)
-        self.pi = nn.Linear(self.emb_size, self.output_space)
-        self.value = nn.Linear(self.emb_size, 1)
+        self.emb_bnorm = nn.BatchNorm1d(self.h_size)
+        self.pi = nn.Linear(self.h_size, self.output_space)
+        self.value = nn.Linear(self.h_size, 1)
 
     def new_size(self, shape, ksize, padding, stride):
         return (shape - ksize + 2*padding)//stride + 1
