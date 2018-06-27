@@ -64,15 +64,25 @@ class A2C:
         print("Prep Shape:,",prepped.shape)
         print("State Shape:,",hyps['state_shape'])
         print("Num Samples Per Update:", shared_len)
-        print("Samples Wasted in Update:", shared_len % hyps['batch_size'])
         del env
+
+        # Make Network
+        net = hyps['model'](hyps['state_shape'], action_size, h_size=hyps['h_size'], bnorm=hyps['use_bnorm'])
+        if hyps['resume']:
+            net.load_state_dict(torch.load(net_save_file))
+        base_net = copy.deepcopy(net)
+        net = cuda_if(net)
+        net.share_memory()
+        base_net = cuda_if(base_net)
 
         # Prepare Shared Variables
         shared_data = {'states': cuda_if(torch.zeros(shared_len, *hyps['state_shape']).share_memory_()),
-                'next_states': cuda_if(torch.zeros(shared_len, *hyps['state_shape']).share_memory_()),
+                'deltas': cuda_if(torch.zeros(shared_len).share_memory_()),
                 'rewards': cuda_if(torch.zeros(shared_len).share_memory_()),
                 'actions': torch.zeros(shared_len).long().share_memory_(),
                 'dones': cuda_if(torch.zeros(shared_len).share_memory_())}
+        if net.is_recurrent:
+            shared_data['h_states'] = cuda_if(torch.zeros(shared_len, net.h_size).share_memory_())
         n_rollouts = hyps['n_rollouts']
         gate_q = mp.Queue(n_rollouts)
         stop_q = mp.Queue(n_rollouts)
@@ -84,15 +94,6 @@ class A2C:
         for i in range(hyps['n_envs']):
             runner = Runner(shared_data, hyps, gate_q, stop_q, reward_q)
             runners.append(runner)
-
-        # Make Network
-        net = hyps['model'](hyps['state_shape'], action_size, bnorm=hyps['use_bnorm'])
-        if hyps['resume']:
-            net.load_state_dict(torch.load(net_save_file))
-        base_net = copy.deepcopy(net)
-        net = cuda_if(net)
-        net.share_memory()
-        base_net = cuda_if(base_net)
 
         # Start Data Collection
         print("Making New Processes")
@@ -121,8 +122,7 @@ class A2C:
         # Training Loop
         past_rews = deque([0]*hyps['n_past_rews'])
         last_avg_rew = 0
-        best_rew_diff = 0
-        best_avg_rew = 0
+        best_avg_rew = -100
         epoch = 0
         T = 0
         while T < hyps['max_tsteps']:
@@ -183,7 +183,7 @@ class A2C:
             gc.collect()
             max_mem_used = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
             print("Time:", time.time()-basetime)
-            if hyps['hyp_search_count'] > 0 and hyps['search_id'] != None:
+            if 'hyp_search_count' in hyps and hyps['hyp_search_count'] > 0 and hyps['search_id'] != None:
                 print("Search:", hyps['search_id'], "/", hyps['hyp_search_count'])
             print("Memory Used: {:.2f} memory\n".format(max_mem_used / 1024))
 

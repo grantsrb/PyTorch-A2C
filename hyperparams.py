@@ -1,6 +1,6 @@
 import sys
 import preprocessing
-from models import ConvModel, FCModel, A3CModel
+from models import ConvModel, FCModel, A3CModel, GRUModel
 import numpy as np
 
 class HyperParams:
@@ -9,29 +9,30 @@ class HyperParams:
         hyp_dict = dict()
         hyp_dict['string_hyps'] = {
                     "exp_name":"default",
-                    "model_type":"conv", # Options include 'dense', 'conv', 'a3c'
+                    "model_type":"conv", # Options include 'dense', 'conv', 'a3c', 'gru'
                     "env_type":"Pong-v0", 
                     "optim_type":'adam' # Options: rmsprop, adam
                     }
         hyp_dict['int_hyps'] = {
                     "max_tsteps": int(1e6),
-                    "n_tsteps": 64, # Maximum number of tsteps per rollout per perturbed copy
+                    "n_tsteps": 15, # Maximum number of tsteps per rollout per perturbed copy
                     "n_envs": 11, # Number of parallel python processes
-                    "n_frame_stack":3, # Number of frames to stack in MDP state
-                    "n_rollouts": 11,
+                    "n_frame_stack":2, # Number of frames to stack in MDP state
+                    "n_rollouts": 45,
+                    "n_past_rews":25,
+                    'h_size':200,
                     "grid_size": 15,
                     "unit_size": 4,
                     "n_foods": 2,
-                    "n_past_rews":25,
                     }
         hyp_dict['float_hyps'] = {
-                    "lr":0.001,
+                    "lr":0.0001,
                     "lr_low": float(1e-12),
-                    "lambda_":.95,
+                    "lambda_":.98,
                     "gamma":.99,
                     "gamma_high":.995,
-                    "val_const":.1,
-                    "entr_coef":.01,
+                    "val_coef":.5,
+                    "entr_coef":.005,
                     "entr_coef_low":.001,
                     "max_norm":.5,
                     }
@@ -52,8 +53,6 @@ class HyperParams:
 
         # Hyperparameter Manipulations
         self.hyps['grid_size'] = [self.hyps['grid_size'],self.hyps['grid_size']]
-        if self.hyps['batch_size'] > self.hyps['n_rollouts']*self.hyps['n_tsteps']:
-            self.hyps['batch_size'] = self.hyps['n_rollouts']*self.hyps['n_tsteps']
 
         # Model Type
         model_type = self.hyps['model_type'].lower()
@@ -63,6 +62,8 @@ class HyperParams:
             self.hyps['model'] = A3CModel
         elif "fc" == model_type or "dense" == model_type:
             self.hyps['model'] = FCModel
+        elif "gru" == model_type or "rnn" == model_type:
+            self.hyps['model'] = GRUModel
         else:
             self.hyps['model'] = ConvModel
 
@@ -138,6 +139,7 @@ def hyper_search(hyps, hyp_ranges, keys, idx, trainer, search_log):
         best_avg_rew = trainer.train(hyps)
         params = [str(key)+":"+str(hyps[key]) for key in keys]
         search_log.write(", ".join(params)+" – BestRew:"+str(best_avg_rew)+"\n")
+        search_log.flush()
     else:
         key = keys[idx]
         for param in hyp_ranges[key]:
