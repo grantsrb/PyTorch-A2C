@@ -158,9 +158,6 @@ class A2C:
             if hyps['decay_entr']:
                 updater.entr_coef = entr_coef_diff*(1-T/(hyps['max_tsteps']))+hyps['entr_coef_low']
                 print("New Entr:", updater.entr_coef)
-            if hyps['incr_gamma']:
-                updater.gamma = gamma_diff*(T/(hyps['max_tsteps']))+hyps['gamma']
-                print("New Gamma:", updater.gamma)
 
             # Periodically save model
             if epoch % 10 == 0:
@@ -194,3 +191,5 @@ class A2C:
         # Close processes
         for p in procs:
             p.terminate()
+
+        return best_avg_rew
