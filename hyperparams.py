@@ -41,7 +41,6 @@ class HyperParams:
                     "render": False,
                     "decay_lr": False,
                     "decay_entr": False,
-                    "incr_gamma": False,
                     "use_nstep_rets": False,
                     "norm_advs": True,
                     "use_bnorm": False,
