@@ -61,7 +61,10 @@ class Updater():
         # Forward Pass
         if 'h_states' in shared_data:
             h_states = Variable(cuda_if(shared_data['h_states']))
-            vals, logits, _ = net(Variable(cuda_if(states)), h_states)
+            if hyps['use_bptt']:
+                vals, logits = self.bptt(states, h_states, dones)
+            else:
+                vals, logits, _ = net(Variable(cuda_if(states)), h_states)
         else:
             vals, logits = net(Variable(cuda_if(states)))
 
@@ -94,6 +97,36 @@ class Updater():
                     "ValLoss":val_loss.item(), "Entropy":entr_loss.item(),
                     "GradNorm":self.norm.item()}
         return self.info
+
+    def bptt(self, states, h_states, dones):
+        """
+        Used to include dependencies over time. It is assumed each rollout is of fixed length.
+
+        states - MDP states at each timestep t
+                type: FloatTensor
+                shape: (n_states, *state_shape)
+        h_states - Recurrent states at timestep t+1
+               type: FloatTensor
+               shape: (n_states, h_size)
+        dones - Collects the dones collected at each timestep t
+               type: FloatTensor
+               shape: (n_states,)
+        """
+        hyps = self.hyps
+        hs = Variable(h_states.view(hyps['n_rollouts'], hyps['n_tsteps'], -1)[:,0])
+        mdp_states = states.view(hyps['n_rollouts'], hyps['n_tsteps'], *states.shape[1:])
+        ds = dones.view(hyps['n_rollouts'], hyps['n_tsteps'])
+        vals, logits = [], []
+        for i in range(hyps['n_tsteps']):
+            inps = Variable(mdp_states[:,i])
+            vs, lgts, hs = self.net(inps, hs)
+            hs = (hs.permute(1,0)*Variable(1-ds[:,i])).permute(1,0)
+            vals.append(vs)
+            logits.append(lgts.unsqueeze(1))
+        vals = torch.cat(vals, dim=-1).view(-1)
+        logits = torch.cat(logits, dim=1).view(-1, lgts.shape[-1])
+        return vals, logits
+
 
     def gae(self, rewards, values, next_vals, dones, gamma, lambda_):
         """
