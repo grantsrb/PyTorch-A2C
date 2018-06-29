@@ -184,7 +184,7 @@ class A2C:
                 print("Search:", hyps['search_id'], "/", hyps['hyp_search_count'])
             print("Memory Used: {:.2f} memory\n".format(max_mem_used / 1024))
 
-        logger.make_plots(hyps['exp_name'])
+        logger.make_plots(base_name)
         log.write("\nBestRew:"+str(best_avg_rew))
         log.close()
 
