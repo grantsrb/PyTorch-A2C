@@ -5,20 +5,6 @@ This is an implementation of [A2C](https://blog.openai.com/baselines-acktr-a2c/)
 
 This implementation includes options for a convolutional model, the original A3C model, a fully connected model (based off Karpathy's Blog), and a GRU based recurrent model. 
 
-#### BPTT
-The recurrent training can optionally use backprop through time (BPTT) which builds gradient dependencies over a sequence of states rather than the simply the current state. This takes more time to run because the model is forced to run through the data in a sequencial manner rather than as a large single batch. See [Performance](#Performance) for a comparison of the two training approaches.
-
-## <a name="Performance">Performance</a>
-The algorithm was trained on Pong-v0. The reward graphs are of the moving average reward over the past 100 episodes. The following plots are of different neural network architectures and training schemes.
-
-------------------
-
-![pong avg rew](./figures/pong_AvgRew.png)
-
-For Pong, the reward metric was averaged over individual 1 point games rather than the entire 21 point game. This makes the minimum reward -1 and the maximum +1.
-
-------------------
-
 ## Dependencies
 - python 3.5 or later
 - gym
