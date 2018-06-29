@@ -3,4 +3,4 @@ __pycache__/
 *.txt
 filedump/
 *.sh
-figures/
+plots/
