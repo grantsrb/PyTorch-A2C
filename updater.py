@@ -1,9 +1,9 @@
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
-import numpy as np
+from utils import cuda_if, discount
+import torch.optim as optim 
 
 class Updater():
     """
@@ -13,155 +13,145 @@ class Updater():
     calc_gradients followed by update_model. If the size of the epoch is restricted by the memory, you can call calc_gradients to clear the graph.
     """
 
-    def cuda_if(self, tobj):
-        if torch.cuda.is_available():
-            tobj = tobj.cuda()
-        return tobj
-
-    def __init__(self, net, lr, entropy_const=0.01, value_const=0.5, gamma=0.99, _lambda=0.98, max_norm=0.5, norm_advs=False):
-        self.net = net
-        self.optim = optim.Adam(self.net.parameters(), lr=lr)
-        #self.optim = self.cuda_if(self.optim)
-        self.global_loss = 0 # Used for efficiency in backprop
-        self.entropy_const = entropy_const
-        self.value_const = value_const
-        self.gamma = gamma
-        self._lambda = _lambda
-        self.max_norm = max_norm
-        self.norm_advs = norm_advs
-
-        # Tracking variables
-        self.pg_loss = 0
-        self.value_loss = 0
-        self.entropy = 0
-        self.loss_count = 0
+    def __init__(self, net, hyps): 
+        self.net = net 
+        self.hyps = hyps
+        self.optim = self.new_optim(hyps['lr'])    
         self.info = {}
+        self.norm = 0
 
-    def calc_gradients(self):
+    def update_model(self, shared_data):
         """
-        Calculates the gradients of each parameter within the net from the global_loss
-        Variable.
+        This function accepts the data collected from a rollout and performs Q value update iterations
+        on the neural net.
 
-        Returns the loss as a float
+        shared_data - dict of torch tensors with shared memory to collect data. Each 
+                tensor contains indices from idx*n_tsteps to (idx+1)*n_tsteps
+                Keys (assume string keys):
+                    "states" - MDP states at each timestep t
+                            type: FloatTensor
+                            shape: (n_states, *state_shape)
+                    "deltas" - gae deltas collected at timestep t+1
+                            type: FloatTensor
+                            shape: (n_states,)
+                    "h_states" - Recurrent states at timestep t+1
+                            type: FloatTensor
+                            shape: (n_states, h_size)
+                    "rewards" - Collects float rewards collected at each timestep t
+                            type: FloatTensor
+                            shape: (n_states,)
+                    "dones" - Collects the dones collected at each timestep t
+                            type: FloatTensor
+                            shape: (n_states,)
+                    "actions" - Collects actions performed at each timestep t
+                            type: LongTensor
+                            shape: (n_states,)
         """
+        hyps = self.hyps
+        net = self.net
+        net.req_grads(True)
 
-        try:
-            self.global_loss.backward()
-            if self.loss_count > 0:
-                self.info = {"Global Loss":self.global_loss.data[0]/self.loss_count,
-                            "Policy Loss":self.pg_loss/self.loss_count,
-                            "Value Loss":self.value_loss/self.loss_count,
-                            "Entropy":self.entropy/self.loss_count}
-            self.global_loss = 0
-            self.pg_loss = 0
-            self.value_loss = 0
-            self.entropy = 0
-            self.loss_count = 0
-        except RuntimeError:
-            print("Attempted to use self.global_loss.backward() when no graph is created yet!")
+        states = shared_data['states']
+        rewards = shared_data['rewards']
+        dones = shared_data['dones']
+        actions = shared_data['actions']
+        deltas = shared_data['deltas']
+        advs = cuda_if(discount(deltas.squeeze(), dones.squeeze(), hyps['gamma']*hyps['lambda_']))
 
-    def calc_loss(self, states, rewards, dones, actions, advantages, gae=True, reinforce=False):
-        """
-        This function accepts the data collected from a rollout, calculates the loss
-        associated with the rollout, and then adds it to the global_loss.
-
-        states - float32 ndarray of the environment states from the rollouts
-                shape = (n_states, *state_shape)
-        rewards - python list of rewards from the rollouts
-                shape = (n_states,)
-        dones - python list of done signals from the rollouts
-                dones = (n_states,)
-        actions - python integer list denoting the actual action
-                indexes taken in the rollout
-        advantages - python float list denoting the tempotal difference
-                    at each step in the rollout
-        gae - boolean denoting whether generalized advantage estimation should
-                be used.
-        reinforce - boolean denoting whether REINFORCE stype updates should
-                be used. gae takes precedence over reinforce.
-
-        """
-
-        states = Variable(self.cuda_if(torch.from_numpy(states)))
-        values, raw_pis = self.net.forward(states)
-        softlog_pis = F.log_softmax(raw_pis, dim=-1)
-        softlog_column = softlog_pis[list(range(softlog_pis.size(0))), actions]
-        if gae:
-            advantages = self.discount(advantages, dones, self.gamma*self._lambda)
-            advantages = self.cuda_if(torch.FloatTensor(advantages))
-        elif reinforce:
-            disc_rewards = self.discount(rewards, dones, self.gamma)
-            advantages = self.cuda_if(torch.FloatTensor(disc_rewards))
+        # Forward Pass
+        if 'h_states' in shared_data:
+            h_states = Variable(cuda_if(shared_data['h_states']))
+            if hyps['use_bptt']:
+                vals, logits = self.bptt(states, h_states, dones)
+            else:
+                vals, logits, _ = net(Variable(cuda_if(states)), h_states)
         else:
-            disc_rewards = self.discount(rewards, dones, self.gamma)
-            advantages = (self.cuda_if(torch.FloatTensor(disc_rewards))-values.data)*(1-self.cuda_if(torch.FloatTensor(dones)))
-        if self.norm_advs or not gae:
-            advantages = self.normalize(advantages)
-        pg_step = softlog_column*Variable(advantages)
-        pg_loss = -torch.mean(pg_step)
+            vals, logits = net(Variable(cuda_if(states)))
 
-        value_targets = self.cuda_if(torch.FloatTensor(self.discount(rewards, dones, self.gamma)))
-        value_loss = self.value_const*F.mse_loss(values.squeeze(),Variable(value_targets))
+        # Log Probabilities
+        log_softs = F.log_softmax(logits, dim=-1)
+        logprobs = log_softs[torch.arange(len(actions)).long(), actions]
 
-        softmaxes = F.softmax(raw_pis, dim=-1)
-        entropy_step = torch.sum(softmaxes*softlog_pis, dim=-1)
-        entropy = -self.entropy_const*torch.mean(entropy_step)
+        # Returns
+        if hyps['use_nstep_rets']: 
+            returns = advs + vals.data.squeeze()
+        else: 
+            returns = cuda_if(discount(rewards.squeeze(), dones.squeeze(), hyps['gamma']))
 
-        self.global_loss += pg_loss + value_loss - entropy
-        self.pg_loss += pg_loss.data[0]
-        self.value_loss += value_loss.data[0]
-        self.entropy += entropy.data[0]
-        self.loss_count += 1
+        # Advantages
+        if hyps['norm_advs']:
+            advs = (advs - advs.mean()) / (advs.std() + 1e-6)
+        
+        # A2C Losses
+        pi_loss = -(logprobs.squeeze()*Variable(advs.squeeze())).mean()
+        val_loss = hyps['val_coef']*F.mse_loss(vals.squeeze(), returns)
+        entr_loss = -hyps['entr_coef']*((log_softs*F.softmax(logits, dim=-1)).sum(-1)).mean()
 
-    def discount(self, array, mask, discount_factor):
+        loss = pi_loss + val_loss - entr_loss
+        loss.backward()
+        self.norm = nn.utils.clip_grad_norm_(net.parameters(), hyps['max_norm'])
+        self.optim.step()
+        self.optim.zero_grad()
+
+        self.info = {"Loss":loss.item(), "Pi_Loss":pi_loss.item(), 
+                    "ValLoss":val_loss.item(), "Entropy":entr_loss.item(),
+                    "GradNorm":self.norm.item()}
+        return self.info
+
+    def bptt(self, states, h_states, dones):
         """
-        Dicounts the argued array following the bellman equation.
+        Used to include dependencies over time. It is assumed each rollout is of fixed length.
 
-        array - array to be discounted
-        mask - binary array denoting the end of an episode
-        discount_factor - float between 0 and 1 used to discount the reward
-
-        Returns the discounted array as an ndarray of type np.float32
+        states - MDP states at each timestep t
+                type: FloatTensor
+                shape: (n_states, *state_shape)
+        h_states - Recurrent states at timestep t+1
+               type: FloatTensor
+               shape: (n_states, h_size)
+        dones - Collects the dones collected at each timestep t
+               type: FloatTensor
+               shape: (n_states,)
         """
+        hyps = self.hyps
+        hs = Variable(h_states.view(hyps['n_rollouts'], hyps['n_tsteps'], -1)[:,0])
+        mdp_states = states.view(hyps['n_rollouts'], hyps['n_tsteps'], *states.shape[1:])
+        ds = dones.view(hyps['n_rollouts'], hyps['n_tsteps'])
+        vals, logits = [], []
+        for i in range(hyps['n_tsteps']):
+            inps = Variable(mdp_states[:,i])
+            vs, lgts, hs = self.net(inps, hs)
+            hs = (hs.permute(1,0)*Variable(1-ds[:,i])).permute(1,0)
+            vals.append(vs)
+            logits.append(lgts.unsqueeze(1))
+        vals = torch.cat(vals, dim=-1).view(-1)
+        logits = torch.cat(logits, dim=1).view(-1, lgts.shape[-1])
+        return vals, logits
 
-        running_sum = 0
-        discounts = [0]*len(array)
-        for i in reversed(range(len(array))):
-            if mask[i] == 1: running_sum = 0
-            running_sum = array[i] + discount_factor*running_sum
-            discounts[i] = running_sum
-        return discounts
 
-    def normalize(self, array, mean=None, std=None):
+    def gae(self, rewards, values, next_vals, dones, gamma, lambda_):
         """
-        Normalizes the array's values. Optionally pass a specific mean or standard
-        deviation to use for normalization.
-
-        array - 1 dimensional ndarray or torch FloatTensor
-        mean - optional float denoting the mean to use for normalization.
-                If None, the mean will be calculated from the array
-        std - optional float denoting the standard deviation to use for
-              normalization. If None, the standard deviation will be
-              calculated from the array.
+        Performs Generalized Advantage Estimation
+    
+        rewards - torch FloatTensor of actual rewards collected. Size = L
+        values - torch FloatTensor of value predictions. Size = L
+        next_vals - torch FloatTensor of value predictions. Size = L
+        dones - torch FloatTensor of done signals. Size = L
+        gamma - float discount factor
+        lambda_ - float gae moving average factor
+    
+        Returns
+         advantages - torch FloatTensor of genralized advantage estimations. Size = L
         """
-
-        assert type(array) == type(np.array([])) or type(array) == type(torch.FloatTensor([]))
-
-        if mean is None:
-            if type(array) == type(np.array([])):
-                mean = np.mean(array)
-            else:
-                mean = torch.mean(array)
-        if std is None:
-            if type(array) == type(np.array([])):
-                std = np.std(array)
-            else:
-                std = torch.std(array)
-
-        return (array - mean)/(std+1e-7)
+    
+        deltas = rewards + gamma*next_vals*(1-dones) - values
+        return cuda_if(discount(deltas, dones, gamma*lambda_))
 
     def print_statistics(self):
-        print(" – ".join([key+": "+str(round(val,5)) if "ntropy" not in key else key+": "+str(val) for key,val in self.info.items()]))
+        print(" – ".join([key+": "+str(round(val,5)) for key,val in sorted(self.info.items())]))
+
+    def log_statistics(self, log, T, reward, avg_action, best_avg_rew):
+        log.write("Step:"+str(T)+" – "+" – ".join([key+": "+str(round(val,5)) if "ntropy" not in key else key+": "+str(val) for key,val in self.info.items()]+["EpRew: "+str(reward), "AvgAction: "+str(avg_action), "BestRew:"+str(best_avg_rew)]) + '\n')
+        log.flush()
 
     def save_model(self, net_file_name, optim_file_name):
         """
@@ -170,16 +160,20 @@ class Updater():
         file_name - string name of the file to save the state_dict to
         """
         torch.save(self.net.state_dict(), net_file_name)
-        torch.save(self.optim.state_dict(), optim_file_name)
+        if optim_file_name is not None:
+            torch.save(self.optim.state_dict(), optim_file_name)
+    
+    def new_lr(self, new_lr):
+        new_optim = self.new_optim(new_lr)
+        new_optim.load_state_dict(self.optim.state_dict())
+        self.optim = new_optim
 
-    def update_model(self):
-        """
-        Performs backprop on any residual graphs and then updates the model using gradient
-        descent.
-        """
+    def new_optim(self, lr):
+        if self.hyps['optim_type'] == 'rmsprop':
+            new_optim = optim.RMSprop(self.net.parameters(), lr=lr) 
+        elif self.hyps['optim_type'] == 'adam':
+            new_optim = optim.Adam(self.net.parameters(), lr=lr) 
+        else:
+            new_optim = optim.RMSprop(self.net.parameters(), lr=lr) 
+        return new_optim
 
-        self.calc_gradients()
-        self.norm = nn.utils.clip_grad_norm(self.net.parameters(), self.max_norm)
-
-        self.optim.step()
-        self.optim.zero_grad()

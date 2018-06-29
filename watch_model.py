@@ -1,47 +1,67 @@
 import sys
-from debug_collector import Collector
 import torch
 from torch.autograd import Variable
+import gym
+import numpy as np
+import conv_model
+import dense_model
+from hyperparams import HyperParams
+from utils import next_state, cuda_if, sample_action
+import torch.nn.functional as F
 
-# Change your policy file here!
-import dense_model as model
-print("Using dense_model as policy file.")
-
-file_name = str(sys.argv[1])
-env_type = 'snake-v0'
-
-# Environment Choices
-grid_size = [15,15]
-n_foods = 2
-unit_size = 4
-n_obs_stack = 2 # number of observations to stack for a single environment state
-
-
-if len(sys.argv) > 2:
-    for arg in sys.argv[2:]:
-        str_arg = str(arg)
-        if "grid_size=" in str_arg: grid_size= [int(str_arg[len('grid_size='):]),int(str_arg[len('grid_size='):])]
-        if "n_foods=" in str_arg: n_foods= int(str_arg[len('n_foods='):])
-        if "unit_size=" in str_arg: unit_size= int(str_arg[len('unit_size='):])
-        if "n_obs_stack=" in str_arg: n_obs_stack= int(str_arg[len('n_obs_stack='):])
-        if "env_type=" in str_arg: env_type = str_arg[len('env_type='):]
+hp = HyperParams()
+hyps = hp.hyps
+file_name = hyps['exp_name'] + "_best.p"
+for arg in sys.argv[1:]:
+    if "file_name" in str(arg) or "=" not in str(arg) or ".p" in str(arg):
+        file_name = arg
+        break
 
 print("file_name:", file_name)
-print("n_obs_stack:", n_obs_stack)
-print("grid_size:", grid_size)
-print("n_foods:", n_foods)
-print("unit_size:", unit_size)
-print("env_type:", env_type)
+print("n_frame_stack:", hyps['n_frame_stack'])
+print("grid_size:", hyps['grid_size'])
+print("n_foods:", hyps['n_foods'])
+print("unit_size:", hyps['unit_size'])
+print("env_type:", hyps['env_type'])
+print("model_type:", hyps['model_type'])
+print("preprocessor:", hyps['preprocess'])
 
+preprocess = hyps['preprocess']
+env_type = env_type
+env = gym.make(env_type)
+env.grid_size = grid_size
+env.n_foods = n_foods
+env.unit_size = unit_size
+action_space = env.action_space.n
+if env_type == 'Pong-v0':
+    action_space = 3
+    hyps['action_offset'] = 1
+elif 'Breakout' in env_type:
+    action_space = 4
 
-collector = Collector(n_envs=1, grid_size=grid_size, n_foods=n_foods, unit_size=unit_size, n_obs_stack=n_obs_stack, net=None, n_tsteps=30, gamma=0, env_type=env_type, preprocessor=model.Model.preprocess)
-net = model.Model(collector.state_shape, collector.action_space, env_type=env_type)
-collector.net = net
-dummy = Variable(torch.ones(2,*collector.state_shape))
-collector.net.forward(dummy)
-collector.net.load_state_dict(torch.load(file_name))
-collector.net.train(mode=False)
-collector.net.req_grads(False)
+obs = env.reset()
+prepped_obs = preprocess(obs, env_type)
+obs_shape = obs.shape
+prepped_shape = prepped_obs.shape
+state_shape = [n_frame_stack*prepped_shape[0],*prepped_shape[1:]]
+state = make_state(prepped_obs)
+net = hyps['model'](state_shape, action_space, bnorm=hyps['use_bnorm'])
+net.load_state_dict(torch.load(file_name))
+net.train(mode=False)
+net.req_grads(False)
 
+last_reset = 0
+ep_reward = 0
+counter = 0
 while True:
-    data = collector.get_data(render=True)
+    counter+=1
+    value, pi = net.forward(Variable(torch.FloatTensor(state).unsqueeze(0)))
+    pi = F.softmax(pi, dim=-1)
+    action = int(get_action(pi.data).squeeze().item())
+    obs, reward, done, info = env.step(action+hyps['action_offset'])
+    ep_reward += reward
+    env.render()
+    if done:
+        print("done", ep_reward)
+        ep_reward=0
+    state = next_state(env, state, obs, done, hyps['preprocess'], state_shape)
