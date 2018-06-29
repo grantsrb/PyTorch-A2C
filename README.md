@@ -88,6 +88,7 @@ See `hyperparams.py` to access the default values.
 * `use_nstep_rets` - if set to true, uses [n-step returns](https://arxiv.org/abs/1705.07445) method for value loss as opposed to empirical discounted rewards.
 * `norm_advs` - if set to true, normalizes advantages over entire dataset. Takes precedence over `norm_batch_advs`.
 * `use_bnorm` - uses batch normalization in model if set to true
+* `use_bptt` - uses backprop through time if using recurrent model and set to true
 
 ##### Specific to snake-v0
 * `grid_size` - integer denoting square dimensions for size of grid for snake.
