@@ -20,7 +20,7 @@ class HyperParams:
                     "n_frame_stack":2, # Number of frames to stack in MDP state
                     "n_rollouts": 45,
                     "n_past_rews":25,
-                    'h_size':200,
+                    'h_size':512,
                     "grid_size": 15,
                     "unit_size": 4,
                     "n_foods": 2,
@@ -44,6 +44,7 @@ class HyperParams:
                     "use_nstep_rets": False,
                     "norm_advs": True,
                     "use_bnorm": False,
+                    "use_bptt": False,
                     }
         self.hyps = self.read_command_line(hyp_dict)
         if arg_hyps is not None:
