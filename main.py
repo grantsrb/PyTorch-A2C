@@ -20,9 +20,9 @@ if __name__ == "__main__":
     hyps['gamma'] = .98
     hyps['lambda_'] = .95
     hyps['n_tsteps'] = 32
-    hyps['n_rollouts'] = 6
-    hyps['n_envs'] = 6
-    hyps['max_tsteps'] = 1000
+    hyps['n_rollouts'] = 36
+    hyps['n_envs'] = 13
+    hyps['max_tsteps'] = 40000000
     hyps['n_frame_stack'] = 3
     hyps['optim_type'] = 'rmsprop'
     hyper_params = HyperParams(hyps)
