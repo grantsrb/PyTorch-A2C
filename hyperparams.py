@@ -17,7 +17,7 @@ class HyperParams:
                     "max_tsteps": int(1e6),
                     "n_tsteps": 15, # Maximum number of tsteps per rollout per perturbed copy
                     "n_envs": 11, # Number of parallel python processes
-                    "n_frame_stack":2, # Number of frames to stack in MDP state
+                    "n_frame_stack":3, # Number of frames to stack in MDP state
                     "n_rollouts": 45,
                     "n_past_rews":25,
                     'h_size':512,

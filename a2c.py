@@ -152,11 +152,13 @@ class A2C:
 
             # Decay HyperParameters
             if hyps['decay_lr']:
-                new_lr = (1-T/(hyps['max_tsteps']))*lr_diff + hyps['lr_low']
+                decay_factor = max((1-T/(hyps['max_tsteps'])), 0)
+                new_lr = decay_factor*lr_diff + hyps['lr_low']
                 updater.new_lr(new_lr)
                 print("New lr:", new_lr)
             if hyps['decay_entr']:
-                updater.entr_coef = entr_coef_diff*(1-T/(hyps['max_tsteps']))+hyps['entr_coef_low']
+                decay_factor = max((1-T/(hyps['max_tsteps'])), 0)
+                updater.entr_coef = entr_coef_diff*decay_factor+hyps['entr_coef_low']
                 print("New Entr:", updater.entr_coef)
 
             # Periodically save model

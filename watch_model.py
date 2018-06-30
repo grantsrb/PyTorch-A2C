@@ -3,11 +3,11 @@ import torch
 from torch.autograd import Variable
 import gym
 import numpy as np
-import conv_model
-import dense_model
 from hyperparams import HyperParams
 from utils import next_state, cuda_if, sample_action
 import torch.nn.functional as F
+import multiprocessing as mp
+from runner import Runner
 
 hp = HyperParams()
 hyps = hp.hyps
@@ -26,12 +26,10 @@ print("env_type:", hyps['env_type'])
 print("model_type:", hyps['model_type'])
 print("preprocessor:", hyps['preprocess'])
 
+hyps['render'] = True
 preprocess = hyps['preprocess']
-env_type = env_type
+env_type = hyps['env_type']
 env = gym.make(env_type)
-env.grid_size = grid_size
-env.n_foods = n_foods
-env.unit_size = unit_size
 action_space = env.action_space.n
 if env_type == 'Pong-v0':
     action_space = 3
@@ -39,29 +37,48 @@ if env_type == 'Pong-v0':
 elif 'Breakout' in env_type:
     action_space = 4
 
+# Miscellaneous Variable Prep
+env = gym.make(hyps['env_type'])
 obs = env.reset()
-prepped_obs = preprocess(obs, env_type)
-obs_shape = obs.shape
-prepped_shape = prepped_obs.shape
-state_shape = [n_frame_stack*prepped_shape[0],*prepped_shape[1:]]
-state = make_state(prepped_obs)
-net = hyps['model'](state_shape, action_space, bnorm=hyps['use_bnorm'])
-net.load_state_dict(torch.load(file_name))
-net.train(mode=False)
-net.req_grads(False)
+prepped = hyps['preprocess'](obs)
+hyps['state_shape'] = [hyps['n_frame_stack']] + [*prepped.shape[1:]]
+if hyps['env_type'] == "Pong-v0":
+    action_size = 3
+else:
+    action_size = env.action_space.n
+hyps['action_shift'] = (4-action_size)*(hyps['env_type']=="Pong-v0") 
+print("Obs Shape:,",obs.shape)
+print("Prep Shape:,",prepped.shape)
+print("State Shape:,",hyps['state_shape'])
+del env
 
-last_reset = 0
-ep_reward = 0
-counter = 0
+# Make Network
+net = hyps['model'](hyps['state_shape'], action_size, h_size=hyps['h_size'], bnorm=hyps['use_bnorm'])
+net.load_state_dict(torch.load(file_name))
+net = cuda_if(net)
+
+# Prepare Shared Variables
+shared_len = hyps['n_tsteps']
+shared_data = {'states': cuda_if(torch.zeros(shared_len, *hyps['state_shape']).share_memory_()),
+        'deltas': cuda_if(torch.zeros(shared_len).share_memory_()),
+        'rewards': cuda_if(torch.zeros(shared_len).share_memory_()),
+        'actions': torch.zeros(shared_len).long().share_memory_(),
+        'dones': cuda_if(torch.zeros(shared_len).share_memory_())}
+if net.is_recurrent:
+    shared_data['h_states'] = cuda_if(torch.zeros(shared_len, net.h_size).share_memory_())
+gate_q = mp.Queue(1)
+stop_q = mp.Queue(1)
+reward_q = mp.Queue(1)
+reward_q.put(-1)
+
+# Make Runner
+runner = Runner(shared_data, hyps, gate_q, stop_q, reward_q)
+
+# Start Runner
+proc = mp.Process(target=runner.run, args=(net,))
+proc.start()
+gate_q.put(0)
+
 while True:
-    counter+=1
-    value, pi = net.forward(Variable(torch.FloatTensor(state).unsqueeze(0)))
-    pi = F.softmax(pi, dim=-1)
-    action = int(get_action(pi.data).squeeze().item())
-    obs, reward, done, info = env.step(action+hyps['action_offset'])
-    ep_reward += reward
-    env.render()
-    if done:
-        print("done", ep_reward)
-        ep_reward=0
-    state = next_state(env, state, obs, done, hyps['preprocess'], state_shape)
+    stop_q.get()
+    gate_q.put(0)

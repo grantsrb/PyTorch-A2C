@@ -108,6 +108,8 @@ class Runner:
             action = sample_action(probs.data)
             action = int(action.item())
             obs, rew, done, info = self.env.step(action+hyps['action_shift'])
+            if hyps['render']:
+                self.env.render()
             self.ep_rew += rew
             reset = done
             if "Pong" in hyps['env_type'] and rew != 0:
