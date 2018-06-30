@@ -6,10 +6,10 @@ if __name__ == "__main__":
     mp.set_start_method('forkserver')
     a2c_trainer = A2C()
     hyps = dict()
-    hyps['exp_name'] = "pong"
+    hyps['exp_name'] = "pongbptt"
     hyps['env_type'] = "Pong-v0"
-    hyps['model_type'] = 'gru'
-    hyps['use_bptt'] = False
+    hyps['model_type'] = 'conv'
+    hyps['use_bptt'] = True
     hyps['entr_coef'] = .01
     hyps['entr_coef_low'] = .001
     hyps['decay_entr'] = True

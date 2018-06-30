@@ -3,14 +3,27 @@
 ## Description
 This is an implementation of [A2C](https://blog.openai.com/baselines-acktr-a2c/) written in PyTorch using OpenAI gym environments.
 
-## Performance
-The algorithm was trained on Pong-v0. The reward graphs are of the moving average reward over the past 100 episodes.
+This implementation includes options for a convolutional model, the original A3C model, a fully connected model (based off Karpathy's Blog), and a GRU based recurrent model. 
+
+#### BPTT
+The recurrent training can optionally use backpropagation through time (BPTT) which builds gradient dependencies over a sequence of states rather than the simply the current state. Preliminary results indicate that using BPTT does not improve training performance. See [Performance](#Performance) for a comparison of the two training approaches.
+
+## <a name="Performance">Performance</a>
+The algorithm was trained on Pong-v0. The reward graphs are of the moving average of the reward collected during rollouts for training.
+
+For Pong, the reward metric is a running average of the reward collected at the end of each game rather than the full 21 point match. This makes the minimum reward -1 and the maximum +1. The moving average factor was set at 0.99.
 
 ------------------
 
 ![pong avg rew](./figures/pong_AvgRew.png)
 
-For Pong, the reward metric was averaged over individual 1 point games rather than the entire 21 point game. This makes the minimum reward -1 and the maximum +1.
+Plot of the average reward during the training of a GRU model on Pong-v0 over the course of 40 million time steps.
+
+------------------
+
+![pongbptt avg rew](./figures/pongbptt_AvgRew.png)
+
+Plot of the average reward during the training of a GRU model on Pong-v0 trained using Backprop Through Time over the course of 40 million time steps.
 
 ------------------
 
@@ -97,6 +110,7 @@ See `hyperparams.py` to access the default values.
 * `use_nstep_rets` - if set to true, uses [n-step returns](https://arxiv.org/abs/1705.07445) method for value loss as opposed to empirical discounted rewards.
 * `norm_advs` - if set to true, normalizes advantages over entire dataset. Takes precedence over `norm_batch_advs`.
 * `use_bnorm` - uses batch normalization in model if set to true
+* `use_bptt` - uses backprop through time if using recurrent model and set to true
 
 ##### Specific to snake-v0
 * `grid_size` - integer denoting square dimensions for size of grid for snake.
