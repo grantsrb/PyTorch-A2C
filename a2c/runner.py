@@ -1,4 +1,4 @@
-from utils import next_state, sample_action, cuda_if
+from a2c.utils import next_state, sample_action, cuda_if
 from torch.autograd import Variable
 import torch
 import gym

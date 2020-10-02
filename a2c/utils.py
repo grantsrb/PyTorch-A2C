@@ -7,6 +7,9 @@ def cuda_if(tobj):
     return tobj
 
 def deque_maxmin(deq):
+    """
+    Finds and returns the maximum and minimum values of a deque.
+    """
     max_val, min_val = deq[0],deq[0]
     for i in range(len(deq)):
         if deq[i] > max_val:
@@ -22,8 +25,8 @@ def next_state(env, obs_deque, obs, reset, preprocess):
     env - environment of interest
     obs_deq - deque of the past n observations
     obs - ndarray returned from the most recent step of the environment
-    reset - boolean denoting the reset signal from the most recent step of the
-            environment
+    reset - boolean denoting the reset signal from the most recent step 
+            of the environment
     preprocess - function that handles preprocessing of raw observation
         type: function
     """

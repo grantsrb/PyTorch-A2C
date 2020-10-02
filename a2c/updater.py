@@ -2,8 +2,8 @@ import torch
 from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
-from utils import cuda_if, discount
-import torch.optim as optim 
+from a2c.utils import cuda_if, discount
+import torch.optim as optim
 
 class Updater():
     """
@@ -95,7 +95,7 @@ class Updater():
 
         self.info = {"Loss":loss.item(), "Pi_Loss":pi_loss.item(), 
                     "ValLoss":val_loss.item(), "Entropy":entr_loss.item(),
-                    "GradNorm":self.norm.item()}
+                    "GradNorm":self.norm}
         return self.info
 
     def bptt(self, states, h_states, dones):
@@ -169,11 +169,7 @@ class Updater():
         self.optim = new_optim
 
     def new_optim(self, lr):
-        if self.hyps['optim_type'] == 'rmsprop':
-            new_optim = optim.RMSprop(self.net.parameters(), lr=lr) 
-        elif self.hyps['optim_type'] == 'adam':
-            new_optim = optim.Adam(self.net.parameters(), lr=lr) 
-        else:
-            new_optim = optim.RMSprop(self.net.parameters(), lr=lr) 
+        new_optim = getattr(optim, self.hyps['optim_type'])
+        new_optim = new_optim(self.net.parameters(), lr=lr)
         return new_optim
 
