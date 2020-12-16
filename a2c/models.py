@@ -198,7 +198,7 @@ class ConvModel(nn.Module):
                                            padding=padding,
                                            stride=stride)
 
-        ksize=3; stride=2; padding=1; in_depth=out_depth
+        ksize=3; stride=1; padding=1; in_depth=out_depth
         out_depth=24
         self.convs.append(self.conv_block(in_depth,out_depth,ksize=ksize,
                                           stride=stride,padding=padding,
@@ -219,7 +219,7 @@ class ConvModel(nn.Module):
                                                      stride=stride)
 
         ksize=3; stride=2; padding=1; in_depth=out_depth
-        out_depth=48
+        out_depth=64
         self.convs.append(self.conv_block(in_depth,out_depth,
                                             ksize=ksize,
                                             stride=stride,
@@ -229,27 +229,27 @@ class ConvModel(nn.Module):
                                                      padding=padding,
                                                      stride=stride)
 
-        ksize=3; stride=2; padding=1; in_depth=out_depth
-        out_depth=64
-        self.convs.append(self.conv_block(in_depth,out_depth,
-                                            ksize=ksize,
-                                            stride=stride,
-                                            padding=padding,
-                                            bnorm=self.bnorm))
-        shape = self.get_new_shape(shape, out_depth, ksize,
-                                                     padding=padding,
-                                                     stride=stride)
-
         self.features = nn.Sequential(*self.convs)
         self.flat_size = int(np.prod(shape))
         print("Flat Features Size:", self.flat_size)
-        self.resize_emb = nn.Sequential(nn.Linear(self.flat_size,
-                                                  self.h_size),
-                                                  nn.ReLU())
+        conv_h = 2000
+        self.resize_emb = nn.Sequential(
+                                nn.Linear(self.flat_size, conv_h),
+                                nn.ReLU())
         # Policy
-        self.emb_bnorm = nn.BatchNorm1d(self.h_size)
-        self.pi = nn.Linear(self.h_size, self.output_space)
-        self.value = nn.Linear(self.h_size, 1)
+        block = []
+        if self.bnorm: block.append(nn.BatchNorm1d(self.h_size))
+        block.append(nn.Linear(conv_h, self.h_size))
+        block.append(nn.ReLU())
+        block.append(nn.Linear(self.h_size,self.output_space))
+        self.pi = nn.Sequential(*block)
+        # Value
+        block = []
+        if self.bnorm: block.append(nn.BatchNorm1d(self.h_size))
+        block.append(nn.Linear(conv_h, self.h_size))
+        block.append(nn.ReLU())
+        block.append(nn.Linear(self.h_size,1))
+        self.value = nn.Sequential(*block)
 
     def get_new_shape(self, shape, depth, ksize, padding, stride):
         new_shape = [depth]
@@ -257,7 +257,7 @@ class ConvModel(nn.Module):
             new_shape.append(self.new_size(shape[i+1], ksize, padding,
                                                               stride))
         return new_shape
-        
+
     def new_size(self, shape, ksize, padding, stride):
         return (shape - ksize + 2*padding)//stride + 1
 
@@ -283,52 +283,32 @@ class ConvModel(nn.Module):
 
         state_emb - the state embedding created by the emb_net
         """
-        if self.bnorm:
-            state_emb = self.emb_bnorm(state_emb)
         pi = self.pi(state_emb)
         value = self.value(state_emb)
         return value, pi
 
     def conv_block(self, chan_in, chan_out, ksize=3, stride=1,
                                                      padding=1,
-                                                     activation="lerelu",
+                                                     activation="ReLU",
                                                      max_pool=False,
                                                      bnorm=True):
         block = []
         block.append(nn.Conv2d(chan_in, chan_out, ksize, stride=stride,
                                                       padding=padding))
-        if activation is not None: activation=activation.lower()
-        if "relu" in activation:
-            block.append(nn.ReLU())
-        elif "elu" in activation:
-            block.append(nn.ELU())
-        elif "tanh" in activation:
-            block.append(nn.Tanh())
-        elif "lerelu" in activation:
-            block.append(nn.LeakyReLU(negative_slope=.05))
-        elif "selu" in activation:
-            block.append(nn.SELU())
+        if activation is not None:
+            block.append(getattr(nn, activation)())
         if max_pool:
             block.append(nn.MaxPool2d(2, 2))
         if bnorm:
             block.append(nn.BatchNorm2d(chan_out))
         return nn.Sequential(*block)
 
-    def dense_block(self, chan_in, chan_out, activation="relu",
+    def dense_block(self, chan_in, chan_out, activation="ReLU",
                                              bnorm=True):
         block = []
         block.append(nn.Linear(chan_in, chan_out))
-        if activation is not None: activation=activation.lower()
-        if "relu" in activation:
-            block.append(nn.ReLU())
-        elif "elu" in activation:
-            block.append(nn.ELU())
-        elif "tanh" in activation:
-            block.append(nn.Tanh())
-        elif "lerelu" in activation:
-            block.append(nn.LeakyReLU())
-        elif "selu" in activation:
-            block.append(nn.SELU())
+        if activation is not None:
+            block.append(getattr(nn, activation)())
         if bnorm:
             block.append(nn.BatchNorm1d(chan_out))
         return nn.Sequential(*block)
