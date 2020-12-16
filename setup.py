@@ -10,7 +10,16 @@ setup(name='a2c',
       url='https://github.com/grantsrb/PyTorch-A2C.git',
       install_requires= ["numpy",
                          "torch",
-                         "tqdm"],
+                         "tqdm",
+                         "matplotlib",
+                         "scikit-image",
+                         "gym",
+                         "mlagents_envs",
+                         "gym_unity",
+                         "resource",
+                         "copy",
+                         "gc"
+                         ],
       py_modules=['a2c'],
       long_description='''
             A project that implements Advantage Actor Critic using

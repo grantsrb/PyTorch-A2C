@@ -1,7 +1,12 @@
 numpy
 torch
 tqdm
-psutil
-h5py
+matplotlib
 scikit-image
-opencv-python
+gym
+mlagents_envs
+gym_unity
+resource
+copy
+gc
+-e git+git://github.com/grantsrb/ml_utils.git@master#egg=ml_utils
