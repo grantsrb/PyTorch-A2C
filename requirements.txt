@@ -10,3 +10,5 @@ resource
 copy
 gc
 -e git+git://github.com/grantsrb/ml_utils.git@master#egg=ml_utils
+-e git+git://github.com/grantsrb/Gym-Snake.git@master#egg=gym_snake
+

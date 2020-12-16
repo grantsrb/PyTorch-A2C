@@ -2,7 +2,7 @@ import os
 import sys
 import gym
 from a2c.logger import Logger
-from a2c.runner import Runner
+from a2c.runner import Runner, StatsRunner
 from a2c.updater import Updater
 from a2c.utils import cuda_if, deque_maxmin
 from a2c.models import *
@@ -31,15 +31,7 @@ def train(hyps, verbose=True):
 
     # Preprocessor Type
     env_type = hyps['env_type'].lower()
-    if "pong" in env_type:
-        hyps['preprocess'] = preprocessing.pong_prep
-    elif "breakout" in env_type:
-        hyps['preprocess'] = preprocessing.breakout_prep
-    elif "snake" in env_type:
-        hyps['preprocess'] = preprocessing.snake_prep
-    else:
-        hyps['preprocess'] = preprocessing.atari_prep
-
+    hyps['preprocessor'] = getattr(preprocessing, hyps['prep_fxn'])
 
     hyps['main_path'] = try_key(hyps, "main_path", "./")
     hyps['exp_num'] = get_exp_num(hyps['main_path'], hyps['exp_name'])
@@ -65,24 +57,22 @@ def train(hyps, verbose=True):
     # Miscellaneous Variable Prep
     logger = Logger()
     shared_len = hyps['n_tsteps']*hyps['n_rollouts']
-    env = gym.make(hyps['env_type'])
+    stats_runner = StatsRunner(hyps)
+    env = stats_runner.env
     obs = env.reset()
-    prepped = hyps['preprocess'](obs)
-    hyps['state_shape'] = [hyps['n_frame_stack']] + [*prepped.shape[1:]]
+    hyps['state_shape'] = [hyps['n_frame_stack']] + [*obs.shape[1:]]
     if hyps['env_type'] == "Pong-v0":
         action_size = 3
     else:
         action_size = env.action_space.n
     hyps['action_shift'] = (4-action_size)*(hyps['env_type']=="Pong-v0") 
-    print("Obs Shape:,",obs.shape)
-    print("Prep Shape:,",prepped.shape)
+    print("Raw Obs Shape:", env.raw_shape)
+    print("Obs Shape:,", obs.shape)
     print("State Shape:,",hyps['state_shape'])
     print("Num Samples Per Update:", shared_len)
-    del env
 
     # Make Network
     hyps["action_size"] = action_size
-    # TODO: make models compatible with **hyps
     net = globals()[hyps['model']](hyps['state_shape'], action_size,
                                    bnorm=hyps['use_bnorm'], **hyps)
     if try_key(hyps, 'resume', False):
@@ -142,7 +132,7 @@ def train(hyps, verbose=True):
     # Training Loop
     past_rews = deque([0]*hyps['n_past_rews'])
     last_avg_rew = 0
-    best_avg_rew = -100
+    best_eval_rew = -np.inf
     epoch = 0
     T = 0
     while T < hyps['max_tsteps']:
@@ -162,15 +152,18 @@ def train(hyps, verbose=True):
         avg_reward = reward_q.get()
         reward_q.put(avg_reward)
         last_avg_rew = avg_reward
-        if avg_reward > best_avg_rew:
-            best_avg_rew = avg_reward
-            updater.save_model(best_net_file, None)
 
         # Calculate the Loss and Update nets
         updater.update_model(shared_data)
         # update all collector nets
         net.load_state_dict(updater.net.state_dict()) 
-        
+
+        eval_rew = stats_runner.rollout(net)
+        if eval_rew > best_eval_rew:
+            best_eval_rew = eval_rew
+            updater.save_model(best_net_file, None)
+        stats_string += "Eval rew: {}\n".format(eval_rew)
+
         # Resume Data Collection
         for i in range(n_rollouts):
             gate_q.put(i)
@@ -202,16 +195,16 @@ def train(hyps, verbose=True):
         rew_avg, rew_std = np.mean(past_rews), np.std(past_rews)
         updater.print_statistics()
         avg_action = shared_data['actions'].float().mean().item()
-        s="Grad Norm: {:.5f} – Avg Action: {:.5f} - Best AvgRew: {:.5f}"
-        s = s.format(float(updater.norm), avg_action, best_avg_rew)
+        s="Grad Norm: {:.5f} – Avg Action: {:.5f} - Best EvalRew: {:.5f}"
+        s = s.format(float(updater.norm), avg_action, best_eval_rew)
         stats_string += s + "\n"
-        s = "Avg Rew: " + str(avg_reward)
-        stats_string += s + "\n"
+        stats_string += "Avg Rew: " + str(avg_reward) + "\n"
         s = "Past "+str(hyps['n_past_rews'])+" Rews – High: {:.5f}"
         s += " - Low: {:.5f} - Avg: {:.5f} - StD: {:.5f}"
         stats_string += s.format(max_rew, min_rew, rew_avg, rew_std)+"\n"
         updater.log_statistics(log, T, avg_reward, avg_action,
-                                                   best_avg_rew)
+                                                   best_eval_rew)
+        updater.info["EvalRew"] = eval_rew
         updater.info['AvgRew'] = avg_reward
         logger.append(updater.info, x_val=T)
 
@@ -229,11 +222,11 @@ def train(hyps, verbose=True):
         print("Memory Used: {:.2f} memory\n".format(max_mem_used / 1024))
 
     logger.make_plots(save_folder+hyps['exp_name'])
-    log.write("\nBestRew:"+str(best_avg_rew))
+    log.write("\nBestRew:"+str(best_eval_rew))
     log.close()
 
     # Close processes
     for p in procs:
         p.terminate()
 
-    return best_avg_rew
+    return best_eval_rew

@@ -7,13 +7,19 @@ import torch.optim as optim
 
 class Updater():
     """
-    This class converts the data collected from the rollouts into useable data to update
-    the model. The main function to use is calc_loss which accepts a rollout to
-    add to the global loss of the model. The model isn't updated, however, until calling
-    calc_gradients followed by update_model. If the size of the epoch is restricted by the memory, you can call calc_gradients to clear the graph.
+    This class converts the data collected from the rollouts into
+    useable data to update the model. The main function to use is
+    calc_loss which accepts a rollout to add to the global loss of
+    the model. The model isn't updated, however, until calling
+    calc_gradients followed by update_model. If the size of the epoch
+    is restricted by the memory, you can call calc_gradients to clear
+    the graph.
     """
-
     def __init__(self, net, hyps): 
+        """
+        net: torch module
+        hyps: dict
+        """
         self.net = net 
         self.hyps = hyps
         self.optim = self.new_optim(hyps['lr'])    
@@ -22,30 +28,31 @@ class Updater():
 
     def update_model(self, shared_data):
         """
-        This function accepts the data collected from a rollout and performs Q value update iterations
-        on the neural net.
+        This function accepts the data collected from a rollout and
+        performs Q value update iterations on the neural net.
 
-        shared_data - dict of torch tensors with shared memory to collect data. Each 
-                tensor contains indices from idx*n_tsteps to (idx+1)*n_tsteps
-                Keys (assume string keys):
-                    "states" - MDP states at each timestep t
-                            type: FloatTensor
-                            shape: (n_states, *state_shape)
-                    "deltas" - gae deltas collected at timestep t+1
-                            type: FloatTensor
-                            shape: (n_states,)
-                    "h_states" - Recurrent states at timestep t+1
-                            type: FloatTensor
-                            shape: (n_states, h_size)
-                    "rewards" - Collects float rewards collected at each timestep t
-                            type: FloatTensor
-                            shape: (n_states,)
-                    "dones" - Collects the dones collected at each timestep t
-                            type: FloatTensor
-                            shape: (n_states,)
-                    "actions" - Collects actions performed at each timestep t
-                            type: LongTensor
-                            shape: (n_states,)
+        shared_data - dict of torch tensors with shared memory to
+            collect data. Each tensor contains indices from
+            idx*n_tsteps to (idx+1)*n_tsteps
+            keys (assume string keys):
+                "states" - MDP states at each timestep t
+                        type: FloatTensor
+                        shape: (n_states, *state_shape)
+                "deltas" - gae deltas collected at timestep t+1
+                        type: FloatTensor
+                        shape: (n_states,)
+                "h_states" - Recurrent states at timestep t+1
+                        type: FloatTensor
+                        shape: (n_states, h_size)
+                "rewards" - Collects float rewards collected at each timestep t
+                        type: FloatTensor
+                        shape: (n_states,)
+                "dones" - Collects the dones collected at each timestep t
+                        type: FloatTensor
+                        shape: (n_states,)
+                "actions" - Collects actions performed at each timestep t
+                        type: LongTensor
+                        shape: (n_states,...)
         """
         hyps = self.hyps
         net = self.net
@@ -56,17 +63,17 @@ class Updater():
         dones = shared_data['dones']
         actions = shared_data['actions']
         deltas = shared_data['deltas']
-        advs = cuda_if(discount(deltas.squeeze(), dones.squeeze(), hyps['gamma']*hyps['lambda_']))
-
+        advs = cuda_if(discount(deltas.squeeze(), dones.squeeze(),
+                                    hyps['gamma']*hyps['lambda_']))
         # Forward Pass
         if 'h_states' in shared_data:
-            h_states = Variable(cuda_if(shared_data['h_states']))
+            h_states = cuda_if(shared_data['h_states'])
             if hyps['use_bptt']:
                 vals, logits = self.bptt(states, h_states, dones)
             else:
-                vals, logits, _ = net(Variable(cuda_if(states)), h_states)
+                vals,logits,_ = net(cuda_if(states), h_states)
         else:
-            vals, logits = net(Variable(cuda_if(states)))
+            vals, logits = net(cuda_if(states))
 
         # Log Probabilities
         log_softs = F.log_softmax(logits, dim=-1)
@@ -76,8 +83,9 @@ class Updater():
         if hyps['use_nstep_rets']: 
             returns = advs + vals.data.squeeze()
         else: 
-            returns = cuda_if(discount(rewards.squeeze(), dones.squeeze(), hyps['gamma']))
-
+            returns = cuda_if(discount(rewards.squeeze(),
+                                       dones.squeeze(),
+                                       hyps['gamma']))
         # Advantages
         if hyps['norm_advs']:
             advs = (advs - advs.mean()) / (advs.std() + 1e-6)
@@ -115,12 +123,12 @@ class Updater():
         hyps = self.hyps
         hs = Variable(h_states.view(hyps['n_rollouts'], hyps['n_tsteps'], -1)[:,0])
         mdp_states = states.view(hyps['n_rollouts'], hyps['n_tsteps'], *states.shape[1:])
-        ds = dones.view(hyps['n_rollouts'], hyps['n_tsteps'])
+        ds = 1-dones.view(hyps['n_rollouts'], hyps['n_tsteps'],1)
         vals, logits = [], []
         for i in range(hyps['n_tsteps']):
             inps = Variable(mdp_states[:,i])
             vs, lgts, hs = self.net(inps, hs)
-            hs = (hs.permute(1,0)*Variable(1-ds[:,i])).permute(1,0)
+            hs = hs*ds[:,i]
             vals.append(vs)
             logits.append(lgts.unsqueeze(1))
         vals = torch.cat(vals, dim=-1).view(-1)

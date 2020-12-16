@@ -18,7 +18,7 @@ def deque_maxmin(deq):
             min_val = deq[i]
     return max_val, min_val
 
-def next_state(env, obs_deque, obs, reset, preprocess):
+def next_state(env, obs_deque, obs, reset):
     """
     Get the next state of the environment.
 
@@ -27,18 +27,13 @@ def next_state(env, obs_deque, obs, reset, preprocess):
     obs - ndarray returned from the most recent step of the environment
     reset - boolean denoting the reset signal from the most recent step 
             of the environment
-    preprocess - function that handles preprocessing of raw observation
-        type: function
     """
 
     if reset:
         obs = env.reset()
-        prepped_obs = preprocess(obs)
         for i in range(obs_deque.maxlen-1):
-            obs_deque.append(np.zeros(prepped_obs.shape))
-    else:
-        prepped_obs = preprocess(obs)
-    obs_deque.append(prepped_obs)
+            obs_deque.append(np.zeros(obs.shape))
+    obs_deque.append(obs)
     state = np.concatenate(obs_deque, axis=0)
     return state
 
