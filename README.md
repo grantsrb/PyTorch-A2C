@@ -27,31 +27,30 @@ Plot of the average reward during the training of a GRU model on Pong-v0 trained
 
 ------------------
 
-## Dependencies
-- python 3.5 or later
-- gym
-- [gym-snake](https://github.com/grantsrb/Gym-Snake)
-- numpy
-- matplotlib
-- pytorch 0.4.0
-
 ## How to Use this Repo
-### Jumping In
-You probably know how to clone a repo if you're getting into RL. But in case you don't, open a bash terminal and type the command:
+### Training
+To train a model you will need to have a hyperparameters json and a hyperranges json. The hyperparameters json details the values of each of the training parameters that will be used for the training. See the [training scripts readme](training_scripts/readme.md) for parameter details. The hyperranges json contains a subset of the hyperparameter keys each coupled to a list of values that will be cycled through for training. Every combination of the hyperranges key value pairs will be scheduled for training. This allows for easy hyperparameter searches. For example, if `lr` is the only key in the hyperranges json, then trainings for each listed value of the learning rate will be queued and processed in order. If `lr` and `l2` each are in the hyperranges json, then every combination of the `lr` and `l2` values will be queued for training.
 
-    $ git clone https://github.com/grantsrb/PyTorch-A2C
+To run a training session, navigate to the `training_scripts` folder:
 
-Then navigate to the top folder using
+```
+$ cd training_scripts
+```
 
-    $ cd PyTorch-A2C
+And then select the cuda device index you will want to use (in this case 0) and type the following command:
 
-Hopefully you have already installed all the appropriate dependencies. See the section called **Dependencies** for a list of required dependencies.
-
-To run a session on gym's Pong-v0 use the command:
-
-    $ python main.py env_type=Pong-v0
-
-This will run a training session with the hyperparameters listed in the `hyperparams.py` where `env_type` is set equal to Pong-v0.
+```
+$ CUDA_VISIBLE_DEVICES=0 python3 main.py path_to_hyperparameters.json path_to_hyperranges.json
+```
+## Setup
+After cloning the repo, install all necessary packages locally:
+```sh
+python3.6 -m pip install --user -r requirements.txt
+```
+Next you will to install this pip package. Run the following:
+```sh
+python3.6 -m pip install --user -e .
+```
 
 ### Watching Your Trained Policy
 After training your policy, you can watch the policy run in the environment using the `watch_model.py` script. To use this file, pass the name of the saved PyTorch Module state dict that you would like to watch. You will also like to specify the environment type and model type by setting the default `hyperparams` in `hyperparams.py` or by specifying at the command line using: `env_type=<name_of_gym_environment>` and `model_type=<model_type>` respectively.
@@ -63,19 +62,11 @@ Here's an example:
 The order of the command line arguments does not matter.
 
 ### Automated Hyper Parameter Search
-Much of deep learning consists of tuning hyperparameters. It can be extremely addicting to change the hyperparameters by hand and then stare at the average reward as the algorithm trains. THIS IS A HOMERIAN SIREN! DO NOT SUCCUMB TO THE PLEASURE! It is too easy to change hyperparameters before their results are fully known. It is difficult to keep track of what you did, and the time spend toying with hyperparameters can be spent reading papers, studying something useful, or calling your Mom and telling her that you love her (you should do that more often btw. And your dad, too.)
+Much of deep learning consists of tuning hyperparameters. It can be extremely addicting to change the hyperparameters by hand and then stare at the average reward as the algorithm trains. THIS IS A HOMERIAN SIREN! DO NOT SUCCUMB TO THE PLEASURE! It is too easy to change hyperparameters before their results are fully known. It is difficult to keep track of what you did, and the time spent toying with hyperparameters can be spent reading papers, studying something useful, or calling your Mom and telling her that you love her (you should do that right now. Your dad, too)
 
-This repo contains an automated system under the name `hypersearch.py`. 
-
-You can set the ranges of the hyperparameters you would like to search over manually, or use the function: `make_hyper_range` located in the `hyperparams.py` file. See `hypersearch.py` for an example.
-
-### Command Line Arguments
-RL algorithms often need to be tuned well for them to work. There are tons of hyperparameters that can have large impacts on the training of the algorithm. In order to help with automated hyperparameter tuning, this project offers a number of optional command line arguments. Each is set using `<argument_name>=<argument>` with no spaces. For example, if you wanted to set the variable `n_envs` (the number of parallel environments) to 15, then you would use the following:
-
-    $ python train_model.py n_envs=15
-
-#### List of Command Line Arguments
-See `hyperparams.py` to access the default values.
+This repo can automate your hyperparameter searches using a `hyperranges json`. Simply specify the key you would like to search over and specify a list of values that you would like that key to take. If multiple keys are listed, then all combinations of the possible values will be searched. 
+#### List of Valid Keys for hyperparams json
+Set values in a json and run `$ python3 main.py hyperparams.json` to use the specified parameters.
 
 ##### String Hyperparameters
 * `exp_name` - string of the name of the experiment. Determines the name that the PyTorch state dicts are saved to.
