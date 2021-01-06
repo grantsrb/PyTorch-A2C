@@ -72,6 +72,7 @@ Set values in a json and run `$ python3 main.py hyperparams.json` to use the spe
 * `exp_name` - string of the name of the experiment. Determines the name that the PyTorch state dicts are saved to.
 * `model_type` - Denotes the model architecture to be used in training. Options include 'fc', 'conv', 'a3c', 'gru'
 * `env_type` - string of the type of environment you would like to use A2C on. The environment must be an OpenAI gym environment.
+* `prep_fxn` - string name of the function defined in `preprocessing.py` to be used as a preprocessor for the incoming observations.
 * `optim_type` - Denotes the type of optimizer to be used in training. Options: rmsprop, adam
 
 ##### Integer Hyperparameters
