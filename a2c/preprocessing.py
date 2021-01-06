@@ -1,6 +1,13 @@
 from skimage.color import rgb2grey
 import numpy as np
 
+def normalize_prep(pic):
+    new_pic = 3*(pic - 255/2)/(255/2)
+    return new_pic[None]
+
+def null_prep(pic):
+    return pic[None]
+
 def pong_prep(pic):
     pic = pic[35:195] # crop
     pic = pic[::2,::2,0] # downsample by factor of 2
