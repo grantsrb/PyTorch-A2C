@@ -1,12 +1,12 @@
 numpy
-Pillow
-scikit-build
 torch
 tqdm
 matplotlib
+Pillow
+scikit-build
 scikit-image
 opencv-python
-gym
+gym[atari]
 mlagents_envs
 gym_unity
 -e git+git://github.com/grantsrb/ml_utils.git@master#egg=ml_utils
