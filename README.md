@@ -42,12 +42,13 @@ And then select the cuda device index you will want to use (in this case 0) and 
 ```
 $ CUDA_VISIBLE_DEVICES=0 python3 main.py path_to_hyperparameters.json path_to_hyperranges.json
 ```
-## Setup
+## Installation
 After cloning the repo, install all necessary packages locally:
 ```sh
+python3.6 -m pip install --upgrade pip
 python3.6 -m pip install --user -r requirements.txt
 ```
-Next you will to install this pip package. Run the following:
+Next you will to install this package. Run the following:
 ```sh
 python3.6 -m pip install --user -e .
 ```

@@ -1,14 +1,14 @@
 numpy
+Pillow
+scikit-build
 torch
 tqdm
 matplotlib
 scikit-image
+opencv-python
 gym
 mlagents_envs
 gym_unity
-resource
-copy
-gc
 -e git+git://github.com/grantsrb/ml_utils.git@master#egg=ml_utils
 -e git+git://github.com/grantsrb/Gym-Snake.git@master#egg=gym_snake
 
