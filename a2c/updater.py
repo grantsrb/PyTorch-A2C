@@ -155,10 +155,19 @@ class Updater():
         return cuda_if(discount(deltas, dones, gamma*lambda_))
 
     def print_statistics(self):
-        print(" – ".join([key+": "+str(round(val,5)) for key,val in sorted(self.info.items())]))
+        nums = {}
+        for k,v in self.info.items():
+            if isinstance(v,torch.Tensor): nums[k] = v.item()
+            else: nums[k] = v
+        arr=[k+": "+str(round(v,5)) for k,v in sorted(nums.items())]
+        print(" – ".join(arr))
 
     def log_statistics(self, log, T, reward, avg_action, best_avg_rew):
-        log.write("Step:"+str(T)+" – "+" – ".join([key+": "+str(round(val,5)) if "ntropy" not in key else key+": "+str(val) for key,val in self.info.items()]+["EpRew: "+str(reward), "AvgAction: "+str(avg_action), "BestRew:"+str(best_avg_rew)]) + '\n')
+        nums = {}
+        for k,v in self.info.items():
+            if isinstance(v,torch.Tensor): nums[k] = v.item()
+            else: nums[k] = v
+        log.write("Step:"+str(T)+" – "+" – ".join([k+": "+str(round(v,5)) if "ntropy" not in k else k+": "+str(v) for k,v in nums.items()]+["EpRew: "+str(reward), "AvgAction: "+str(avg_action), "BestRew:"+str(best_avg_rew)]) + '\n')
         log.flush()
 
     def save_model(self, net_file_name, optim_file_name):
