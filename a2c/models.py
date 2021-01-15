@@ -7,6 +7,7 @@ import numpy as np
 class A3CModel(nn.Module):
     def __init__(self, input_space, output_space, h_size=256,
                                                   bnorm=False,
+                                                  is_discrete=True,
                                                   **kwargs):
         super().__init__()
 
@@ -14,6 +15,7 @@ class A3CModel(nn.Module):
         self.input_space = input_space
         self.output_space = output_space
         self.h_size = h_size
+        self.is_discrete = is_discrete
 
         # Embedding Net
         self.convs = nn.ModuleList([])
@@ -39,7 +41,9 @@ class A3CModel(nn.Module):
 
         # Policy
         self.emb_bnorm = nn.BatchNorm1d(self.h_size)
-        self.pi = nn.Linear(self.h_size, self.output_space)
+        outsize = self.output_space if self.is_discrete\
+                                    else 2*self.output_space
+        self.pi = nn.Linear(self.h_size, outsize)
         self.value = nn.Linear(self.h_size, 1)
 
     def new_size(self, shape, ksize, padding, stride):
@@ -79,6 +83,10 @@ class A3CModel(nn.Module):
             state_emb = self.emb_bnorm(state_emb)
         pi = self.pi(state_emb)
         value = self.value(Variable(state_emb.data))
+        if not self.is_discrete:
+            mu,sigma = torch.chunk(pi,2,dim=-1)
+            sigma = F.softplus(sigma)+0.0001
+            return value, (mu,sigma)
         return value, pi
 
     def conv_block(self, chan_in, chan_out, ksize=3, stride=1,
@@ -174,6 +182,7 @@ class ConvModel(nn.Module):
 
     def __init__(self, input_space, output_space, h_size=288,
                                                   bnorm=False,
+                                                  is_discrete=True,
                                                   **kwargs):
         super().__init__()
 
@@ -182,6 +191,7 @@ class ConvModel(nn.Module):
         self.output_space = output_space
         self.h_size = h_size
         self.bnorm = bnorm
+        self.is_discrete = is_discrete
 
         self.convs = nn.ModuleList([])
 
@@ -241,7 +251,9 @@ class ConvModel(nn.Module):
         if self.bnorm: block.append(nn.BatchNorm1d(self.h_size))
         block.append(nn.Linear(conv_h, self.h_size))
         block.append(nn.ReLU())
-        block.append(nn.Linear(self.h_size,self.output_space))
+        outsize = self.output_space if self.is_discrete\
+                                else 2*self.output_space
+        block.append(nn.Linear(self.h_size,outsize))
         self.pi = nn.Sequential(*block)
         # Value
         block = []
@@ -285,6 +297,10 @@ class ConvModel(nn.Module):
         """
         pi = self.pi(state_emb)
         value = self.value(state_emb)
+        if not self.is_discrete:
+            mu,sigma = torch.chunk(pi,2,dim=-1)
+            sigma = F.softplus(sigma)+0.0001
+            return value, (mu,sigma)
         return value, pi
 
     def conv_block(self, chan_in, chan_out, ksize=3, stride=1,
@@ -351,11 +367,15 @@ class ConvModel(nn.Module):
 class FCModel(nn.Module):
     def __init__(self, input_shape, output_space, h_size=200,
                                                 bnorm=False,
+                                                is_discrete=True,
                                                 **kwargs):
         super(FCModel, self).__init__()
 
+        self.is_discrete = is_discrete
         self.is_recurrent = False
         self.flat_size = np.prod(input_shape[-3:])
+        self.input_shape = input_shape
+        self.output_space = output_space
 
         block = [nn.Linear(self.flat_size, h_size)]
         if bnorm:
@@ -367,15 +387,22 @@ class FCModel(nn.Module):
 
         self.base = nn.Sequential(*block)
 
-        self.action_out = nn.Linear(h_size, output_space)
-        self.value_out = nn.Linear(h_size, 1)
+        outsize = output_space if is_discrete else 2*output_space
+        self.action_out = nn.Linear(h_size, outsize)
+        self.value_out = nn.Sequential(nn.LayerNorm(h_size),
+                                       nn.Linear(h_size, 1),
+                                       nn.Linear(1,1))
 
     def forward(self, x):
         fx = x.view(len(x), -1)
         fx = self.base(fx)
-        action = self.action_out(fx)
+        pi = self.action_out(fx)
         value = self.value_out(fx)
-        return value, action
+        if not self.is_discrete:
+            mu,sigma = torch.chunk(pi,2,dim=-1)
+            sigma = F.softplus(sigma)+0.0001
+            return value, (mu,sigma)
+        return value, pi
 
     def check_grads(self):
         """
@@ -453,6 +480,69 @@ class GRU(nn.Module):
             if torch.sum(p.grad.data != p.grad.data):
                 print("NaN in grads")
 
+class GRUFCModel(nn.Module):
+    def __init__(self, input_shape, output_space, h_size=200,
+                                                bnorm=False,
+                                                is_discrete=True,
+                                                **kwargs):
+        super(GRUFCModel, self).__init__()
+
+        self.h_size = h_size
+        self.is_discrete = is_discrete
+        self.is_recurrent = True
+        self.flat_size = np.prod(input_shape[-3:])
+        self.input_shape = input_shape
+        self.output_space = output_space
+
+        block = [nn.Linear(self.flat_size, h_size)]
+        if bnorm:
+            block.append(nn.BatchNorm1d(h_size))
+        block.append(nn.ReLU())
+        block.append(nn.Linear(h_size, h_size))
+        if bnorm:
+            block.append(nn.BatchNorm1d(h_size))
+
+        self.base = nn.Sequential(*block)
+        self.gru = GRU(x_size=self.h_size, h_size=self.h_size)
+
+        outsize = output_space if is_discrete else 2*output_space
+        self.action_out = nn.Linear(h_size, outsize)
+        self.value_out = nn.Sequential(nn.LayerNorm(h_size),
+                                       nn.Linear(h_size, 1),
+                                       nn.Linear(1,1))
+
+    def forward(self, x, old_h):
+        fx = x.view(len(x), -1)
+        fx = self.base(fx)
+        h = self.gru(fx,old_h)
+        pi = self.action_out(h)
+        value = self.value_out(h)
+        if not self.is_discrete:
+            mu,sigma = torch.chunk(pi,2,dim=-1)
+            sigma = F.softplus(sigma)+0.0001
+            return value, (mu,sigma), h
+        return value, pi, h
+
+    def check_grads(self):
+        """
+        Checks all gradients for NaN values. NaNs have a way of
+        sneaking into pytorch...
+        """
+        for param in self.parameters():
+            if torch.sum(param.data != param.data) > 0:
+                print("NaNs in Grad!")
+
+    def req_grads(self, grad_on):
+        """
+        Used to turn off and on all gradient calculation requirements
+        for speed.
+
+        grad_on - bool denoting whether gradients should be calculated
+        """
+        for p in self.parameters():
+            p.requires_grad = grad_on
+
+
 class GRUModel(nn.Module):
     def cuda_if(self, tobj):
         if torch.cuda.is_available():
@@ -461,6 +551,7 @@ class GRUModel(nn.Module):
 
     def __init__(self, input_space, output_space, h_size=288,
                                                   bnorm=False,
+                                                  is_discrete=True,
                                                   **kwargs):
         super(GRUModel, self).__init__()
 
@@ -469,6 +560,7 @@ class GRUModel(nn.Module):
         self.output_space = output_space
         self.h_size = h_size
         self.bnorm = bnorm
+        self.is_discrete = is_discrete
 
         self.convs = nn.ModuleList([])
 
@@ -538,7 +630,9 @@ class GRUModel(nn.Module):
         self.gru = GRU(x_size=self.h_size, h_size=self.h_size)
 
         # Policy
-        self.pi = nn.Linear(self.h_size, self.output_space)
+        outsize = self.output_space if self.is_discrete\
+                                    else 2*self.output_space
+        self.pi = nn.Linear(self.h_size, outsize)
         self.value = nn.Linear(self.h_size, 1)
 
     def get_new_shape(self, shape, depth, ksize, padding, stride):
@@ -576,6 +670,10 @@ class GRUModel(nn.Module):
         """
         pi = self.pi(h)
         value = self.value(h)
+        if not self.is_discrete:
+            mu,sigma = torch.chunk(pi,2,dim=-1)
+            sigma = F.softplus(sigma)+0.0001
+            return value, (mu,sigma)
         return value, pi
 
     def conv_block(self, chan_in, chan_out, ksize=3, stride=1,

@@ -1,8 +1,9 @@
+import numpy as np
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
-from a2c.utils import cuda_if, discount
+from a2c.utils import cuda_if, discount, try_key
 import torch.optim as optim
 
 class Updater():
@@ -22,9 +23,12 @@ class Updater():
         """
         self.net = net 
         self.hyps = hyps
+        self.is_discrete = hyps['is_discrete']
         self.optim = self.new_optim(hyps['lr'])    
         self.info = {}
         self.norm = 0
+        self.ret_mean = None
+        self.ret_std = None
 
     def update_model(self, shared_data):
         """
@@ -75,10 +79,6 @@ class Updater():
         else:
             vals, logits = net(cuda_if(states))
 
-        # Log Probabilities
-        log_softs = F.log_softmax(logits, dim=-1)
-        logprobs = log_softs[torch.arange(len(actions)).long(), actions]
-
         # Returns
         if hyps['use_nstep_rets']: 
             returns = advs + vals.data.squeeze()
@@ -86,18 +86,48 @@ class Updater():
             returns = cuda_if(discount(rewards.squeeze(),
                                        dones.squeeze(),
                                        hyps['gamma']))
-        # Advantages
+        if try_key(hyps,'norm_returns',False):
+            if self.ret_mean is None:
+                self.ret_mean = returns.mean()
+                self.ret_std = returns.std()
+            else:
+                self.ret_mean = 0.01*returns.mean()+0.99*self.ret_mean
+                self.ret_std = 0.01*returns.std()+0.99*self.ret_std
+            returns = (returns-self.ret_mean)/(self.ret_std+1e-6)
         if hyps['norm_advs']:
             advs = (advs - advs.mean()) / (advs.std() + 1e-6)
         
-        # A2C Losses
-        pi_loss = -(logprobs.squeeze()*Variable(advs.squeeze())).mean()
-        val_loss = hyps['val_coef']*F.mse_loss(vals.squeeze(), returns)
-        entr_loss = -hyps['entr_coef']*((log_softs*F.softmax(logits, dim=-1)).sum(-1)).mean()
+        # Log Probabilities
+        if self.is_discrete:
+            log_softs = F.log_softmax(logits, dim=-1)
+            arange = torch.arange(len(actions)).long()
+            log_ps = log_softs[arange, actions]
+            temp = (log_softs*F.softmax(logits, dim=-1))
+            entr_loss = -hyps['entr_coef']*(temp.sum(-1)).mean()
+        else:
+            mus,sigmas = logits
+            # log_ps should be -(mu-act)^2/(2sig^2)+ln(1/(sqrt(2pi)sig))
+            log_ps = -F.mse_loss(mus,actions.cuda())
+            log_ps = log_ps/(2*torch.clamp(sigmas**2, min=1e-3))
+            root2pisigs = torch.clamp(float(np.sqrt(2*np.pi))*sigmas,
+                                                            min=1e-3)
+            logsigs = torch.log(root2pisigs)
+            log_ps -= logsigs
+            # entropy should be 0.5+ln(sqrt(2*pi)*sigma)
+            entr_loss = -hyps['entr_coef']*logsigs.mean()
 
-        loss = pi_loss + val_loss - entr_loss
+        advs = advs.squeeze()
+        for i in range(len(log_ps.squeeze().shape)-len(advs.shape)):
+            advs = advs[...,None]
+
+        # A2C Losses
+        pi_loss =  hyps['pi_coef']*-(log_ps*advs).mean()
+        val_loss = hyps['val_coef']*F.mse_loss(vals.squeeze(),returns)
+
+        loss = pi_loss + val_loss - entr_loss # Want to maximize entropy
         loss.backward()
-        self.norm = nn.utils.clip_grad_norm_(net.parameters(), hyps['max_norm'])
+        self.norm = nn.utils.clip_grad_norm_(net.parameters(),
+                                             hyps['max_norm'])
         self.optim.step()
         self.optim.zero_grad()
 
@@ -108,7 +138,8 @@ class Updater():
 
     def bptt(self, states, h_states, dones):
         """
-        Used to include dependencies over time. It is assumed each rollout is of fixed length.
+        Used to include dependencies over time. It is assumed each
+        rollout is of fixed length.
 
         states - MDP states at each timestep t
                 type: FloatTensor
@@ -121,8 +152,10 @@ class Updater():
                shape: (n_states,)
         """
         hyps = self.hyps
-        hs = Variable(h_states.view(hyps['n_rollouts'], hyps['n_tsteps'], -1)[:,0])
-        mdp_states = states.view(hyps['n_rollouts'], hyps['n_tsteps'], *states.shape[1:])
+        hs = Variable(h_states.view(hyps['n_rollouts'],
+                                    hyps['n_tsteps'], -1)[:,0])
+        mdp_states = states.view(hyps['n_rollouts'], hyps['n_tsteps'],
+                                                     *states.shape[1:])
         ds = 1-dones.view(hyps['n_rollouts'], hyps['n_tsteps'],1)
         vals, logits = [], []
         for i in range(hyps['n_tsteps']):
@@ -140,15 +173,16 @@ class Updater():
         """
         Performs Generalized Advantage Estimation
     
-        rewards - torch FloatTensor of actual rewards collected. Size = L
-        values - torch FloatTensor of value predictions. Size = L
-        next_vals - torch FloatTensor of value predictions. Size = L
-        dones - torch FloatTensor of done signals. Size = L
-        gamma - float discount factor
-        lambda_ - float gae moving average factor
+        rewards: torch FloatTensor of actual rewards collected. Size = L
+        values: torch FloatTensor of value predictions. Size = L
+        next_vals: torch FloatTensor of value predictions. Size = L
+        dones: torch FloatTensor of done signals. Size = L
+        gamma: float discount factor
+        lambda_: float gae moving average factor
     
         Returns
-         advantages - torch FloatTensor of genralized advantage estimations. Size = L
+         advantages: torch FloatTensor
+            genralized advantage estimations. Size = L
         """
     
         deltas = rewards + gamma*next_vals*(1-dones) - values
@@ -167,7 +201,11 @@ class Updater():
         for k,v in self.info.items():
             if isinstance(v,torch.Tensor): nums[k] = v.item()
             else: nums[k] = v
-        log.write("Step:"+str(T)+" – "+" – ".join([k+": "+str(round(v,5)) if "ntropy" not in k else k+": "+str(v) for k,v in nums.items()]+["EpRew: "+str(reward), "AvgAction: "+str(avg_action), "BestRew:"+str(best_avg_rew)]) + '\n')
+        arr = [k+": "+str(round(v,5)) if "ntropy" not in k\
+                            else k+": "+str(v) for k,v in nums.items()]
+        arr += ["EpRew: "+str(reward), "AvgAction: "+str(avg_action),
+                                       "BestRew:"+str(best_avg_rew)]
+        log.write("Step:"+str(T)+" – "+" – ".join(arr) + '\n')
         log.flush()
 
     def save_model(self, net_file_name, optim_file_name):

@@ -59,13 +59,15 @@ def train(_, hyps, verbose=True):
     shared_len = hyps['n_tsteps']*hyps['n_rollouts']
     stats_runner = StatsRunner(hyps)
     env = stats_runner.env
+    hyps['is_discrete'] = env.is_discrete
     obs = env.reset()
     hyps['state_shape'] = [hyps['n_frame_stack']] + [*obs.shape[1:]]
     if hyps['env_type'] == "Pong-v0":
         action_size = 3
+        hyps['action_shift'] = 1
     else:
-        action_size = env.action_space.n
-    hyps['action_shift'] = (4-action_size)*(hyps['env_type']=="Pong-v0") 
+        action_size = env.n
+        hyps['action_shift'] = 0
     print("Raw Obs Shape:", env.raw_shape)
     print("Obs Shape:,", obs.shape)
     print("State Shape:,",hyps['state_shape'])
@@ -83,12 +85,16 @@ def train(_, hyps, verbose=True):
     base_net = cuda_if(base_net)
 
     # Prepare Shared Variables
-    zeros = torch.zeros(shared_len,*hyps['state_shape'])
+    states_shape = (shared_len,*hyps['state_shape'])
+    if env.is_discrete:
+        actions = torch.zeros(shared_len).long()
+    else:
+        actions = torch.zeros((shared_len,env.n)).float()
     shared_data = {
-            'states': cuda_if(zeros.share_memory_()),
+            'states': cuda_if(torch.zeros(states_shape).share_memory_()),
             'deltas': cuda_if(torch.zeros(shared_len).share_memory_()),
             'rewards': cuda_if(torch.zeros(shared_len).share_memory_()),
-            'actions': torch.zeros(shared_len).long().share_memory_(),
+            'actions': actions.share_memory_(),
             'dones': cuda_if(torch.zeros(shared_len).share_memory_())}
     if net.is_recurrent:
         zeros = torch.zeros(shared_len,net.h_size)

@@ -1,6 +1,11 @@
 import torch
 import numpy as np
 
+def try_key(dict_, key, default):
+    if key in dict_:
+        return dict_[key]
+    return default
+
 def cuda_if(tobj):
     if torch.cuda.is_available():
         tobj = tobj.cuda()

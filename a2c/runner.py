@@ -1,3 +1,4 @@
+import numpy as np
 import time
 from ml_utils.utils import try_key
 from a2c.utils import next_state, sample_action, cuda_if
@@ -20,6 +21,7 @@ class SequentialEnvironment:
     """
 
     def __init__(self, env_type, preprocessor, seed=time.time(),
+                                               float_params=dict(),
                                                **kwargs):
         """
         env_type: str
@@ -33,48 +35,28 @@ class SequentialEnvironment:
         self.env_type = env_type
         self.preprocessor = preprocessor
         self.seed = seed
+        self.float_params = float_params
 
         try:
             self.env = gym.make(env_type)
             self.env.seed(self.seed)
             self.is_gym = True
             self.raw_shape = self.env.reset().shape
+            self.is_discrete = hasattr(self.env.action_space,"n")
+            if hasattr(self.env.action_space,"n"):
+                self.n =  self.env.action_space.n
+                self.is_discrete = True
+            else:
+                self.is_discrete = False
+                self.n = self.env.action_space.shape[0]
         except:
-            self.env = self.make_unity_env(env_type, seed=self.seed,
-                                                **kwargs)
-            self.is_gym = False
-            self.raw_shape = self.env.reset()[0].shape
-
-    def make_unity_env(self, path, float_params=None, time_scale=1,
-                                                      seed=time.time(),
-                                                      **kwargs):
-        """
-        creates a gym environment from a unity game
-
-        env_type: str
-            the path to the game
-        float_params: dict or None
-            this should be a dict of argument settings for the unity
-            environment
-            keys: varies by environment
-        time_scale: float
-            argument to set Unity's time scale. This applies less to
-            gym wrapped versions of Unity Environments, I believe..
-            but I'm not sure
-        seed: int
-            the seed for randomness
-        """
-        path = os.path.expanduser(env_type)
-        channel = EngineConfigurationChannel()
-        env_channel = EnvironmentParametersChannel()
-        env = UnityEnvironment(file_name=path,
-                               side_channels=[channel,env_channel],
-                               seed=seed)
-        channel.set_configuration_parameters(time_scale = 1)
-        env_channel.set_float_parameter("validation", 0)
-        env_channel.set_float_parameter("egoCentered", 0)
-        env = UnityToGymWrapper(env, allow_multiple_obs=True)
-        return env
+            raise NotImplemented #"Unity compatibility not implemented"
+            #self.env = UnityGymEnv(env_name=env_type,seed=self.seed,
+            #                             worker_id=self.seed,
+            #                             float_params=self.float_params)
+            #self.is_gym = False
+            #self.raw_shape = self.env.reset()[0].shape
+            #self.is_discrete = False
 
     def prep_obs(self, obs):
         """
@@ -84,10 +66,7 @@ class SequentialEnvironment:
         if self.is_gym:
             prepped_obs = self.preprocessor(obs)
         else:
-            prepped_obs = self.preprocessor(obs[0])
-            # Handles the additional observations passed by the env
-            if len(obs) > 1:
-                prepped_obs = [prepped_obs, *obs[1:]]
+            prepped_obs = self.env.prep_obs(obs)
         return prepped_obs
 
     def reset(self):
@@ -112,13 +91,19 @@ class SequentialEnvironment:
         preds: torch tensor (..., N)
             the outputs from the model
         """
-        if self.is_gym:
+        if self.is_gym and self.is_discrete:
             probs = F.softmax(preds, dim=-1)
             action = sample_action(probs.data)
             return int(action.item())
+        elif self.is_gym:
+            mus,sigmas = preds
+            actions = mus+sigmas*torch.randn_like(sigmas)
+            actions = actions.detach().cpu().data.squeeze().numpy()
+            if len(actions.shape) == 0:
+                actions = np.asarray([float(actions)])
+            return actions
         else:
-            preds = preds.squeeze().cpu().data.numpy()
-            return preds
+            raise NotImplemented
 
 
 class Runner:
@@ -188,9 +173,10 @@ class Runner:
 
     def rollout(self, net, idx, hyps):
         """
-        rollout handles the actual rollout of the environment for n steps in time.
-        It is called from run and performs a single rollout, placing the
-        collected data into the shared lists found in the datas dict.
+        rollout handles the actual rollout of the environment for n
+        steps in time. It is called from run and performs a single
+        rollout, placing the collected data into the shared lists
+        found in the datas dict.
 
         net - torch Module object. This is the model to interact with the
             environment.
@@ -218,9 +204,7 @@ class Runner:
                 val, logits, h = net(state_in, h_in)
             else:
                 val, logits = net(state_in)
-            probs = F.softmax(logits, dim=-1)
-            action = sample_action(probs.data)
-            action = int(action.item())
+            action = self.env.get_action(logits)
             obs, rew, done, info = self.env.step(action+hyps['action_shift'])
             if hyps['render']:
                 self.env.render()
@@ -237,6 +221,8 @@ class Runner:
 
             self.datas['rewards'][startx+i] = rew
             self.datas['dones'][startx+i] = float(done)
+            if isinstance(action,np.ndarray):
+                action = torch.from_numpy(action)
             self.datas['actions'][startx+i] = action
             state = next_state(self.env, self.obs_deque, obs=obs, reset=reset)
             if i > 0:
