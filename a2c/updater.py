@@ -155,10 +155,28 @@ class Updater():
         return cuda_if(discount(deltas, dones, gamma*lambda_))
 
     def print_statistics(self):
-        print(" – ".join([key+": "+str(round(val,5)) for key,val in sorted(self.info.items())]))
+        strings = []
+        for key,val in self.info.items():
+            v = val if type(val) != torch.Tensor else val.item()
+            s = key + ": " + str(round(v,5))
+            strings.append(s)
+        print(" – ".join(strings))
 
     def log_statistics(self, log, T, reward, avg_action, best_avg_rew):
-        log.write("Step:"+str(T)+" – "+" – ".join([key+": "+str(round(val,5)) if "ntropy" not in key else key+": "+str(val) for key,val in self.info.items()]+["EpRew: "+str(reward), "AvgAction: "+str(avg_action), "BestRew:"+str(best_avg_rew)]) + '\n')
+        strings = []
+        for key,val in self.info.items():
+            v = val if type(val) != torch.Tensor else val.item()
+            if "ntropy" not in key:
+                s = key+": "+str(round(v,5))
+            else:
+                s = key+": "+str(v)
+            strings.append(s)
+        strings = strings + [
+            "EpRew: "+str(reward),
+            "AvgAction: "+str(avg_action),
+            "BestRew:"+str(best_avg_rew)
+        ]
+        log.write("Step:"+str(T)+" – "+" – ".join(strings) + '\n')
         log.flush()
 
     def save_model(self, net_file_name, optim_file_name):

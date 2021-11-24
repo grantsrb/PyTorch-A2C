@@ -2,6 +2,7 @@ import time
 from ml_utils.utils import try_key
 from a2c.utils import next_state, sample_action, cuda_if
 import torch
+import gordongames
 import gym
 import torch.nn.functional as F
 from collections import deque
@@ -35,7 +36,10 @@ class SequentialEnvironment:
         self.seed = seed
 
         try:
-            self.env = gym.make(env_type)
+            if "gordongames" in env_type or "nake" in env_type:
+                self.env = gym.make(env_type, **kwargs)
+            else:
+                self.env = gym.make(env_type)
             self.env.seed(self.seed)
             self.is_gym = True
             self.raw_shape = self.env.reset().shape
@@ -44,6 +48,7 @@ class SequentialEnvironment:
                                                 **kwargs)
             self.is_gym = False
             self.raw_shape = self.env.reset()[0].shape
+        self.action_space = self.env.action_space
 
     def make_unity_env(self, path, float_params=None, time_scale=1,
                                                       seed=time.time(),
@@ -292,6 +297,7 @@ class StatsRunner:
         net: torch Module
             the neural network to be used in the environment
         """
+        print("Starting evaluation")
         state = next_state(self.env, self.obs_deque, obs=None, reset=True)
         h = None
         if net.is_recurrent:

@@ -1,6 +1,5 @@
 import os
 import sys
-import gym
 from a2c.logger import Logger
 from a2c.runner import Runner, StatsRunner
 from a2c.updater import Updater
@@ -20,7 +19,7 @@ from ml_utils.utils import try_key
 from ml_utils.training import get_exp_num, record_session, get_save_folder
 import ml_utils
 
-def train(hyps, verbose=True): 
+def train(_, hyps, verbose=True): 
     """
     hyps - dictionary of required hyperparameters
         type: dict
