@@ -125,6 +125,11 @@ class SequentialEnvironment:
             preds = preds.squeeze().cpu().data.numpy()
             return preds
 
+    def render(self):
+        """
+        Calls the environment's render function if one exists
+        """
+        if hasattr(self.env, "render"): self.env.render()
 
 class Runner:
     def __init__(self, datas, hyps, gate_q, stop_q, rew_q):
