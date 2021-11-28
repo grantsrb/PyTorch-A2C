@@ -17,6 +17,7 @@ import time
 from collections import deque
 from ml_utils.utils import try_key
 from ml_utils.training import get_exp_num, record_session, get_save_folder
+from ml_utils.save_io import save_checkpt
 import ml_utils
 
 def train(_, hyps, verbose=True): 
@@ -60,6 +61,7 @@ def train(_, hyps, verbose=True):
     env = stats_runner.env
     obs = env.reset()
     hyps['state_shape'] = [hyps['n_frame_stack']] + [*obs.shape[1:]]
+    hyps['input_shape'] = hyps['state_shape']
     if hyps['env_type'] == "Pong-v0":
         action_size = 3
     else:
@@ -72,8 +74,9 @@ def train(_, hyps, verbose=True):
 
     # Make Network
     hyps["action_size"] = action_size
-    net = globals()[hyps['model']](hyps['state_shape'], action_size,
-                                   bnorm=hyps['use_bnorm'], **hyps)
+    hyps['output_space'] = action_size
+    hyps['bnorm'] = hyps['use_bnorm']
+    net = globals()[hyps['model']](**hyps)
     if try_key(hyps, 'resume', False):
         net.load_state_dict(torch.load(net_save_file))
     base_net = copy.deepcopy(net)
@@ -158,9 +161,6 @@ def train(_, hyps, verbose=True):
         net.load_state_dict(updater.net.state_dict()) 
 
         eval_rew = stats_runner.rollout(net)
-        if eval_rew > best_eval_rew:
-            best_eval_rew = eval_rew
-            updater.save_model(best_net_file, None)
         stats_string += "Eval rew: {}\n".format(eval_rew)
 
         # Resume Data Collection
@@ -183,10 +183,6 @@ def train(_, hyps, verbose=True):
             print(s)
             stats_string += s + "\n"
 
-        # Periodically save model
-        if epoch % 10 == 0:
-            updater.save_model(net_save_file, optim_save_file)
-
         # Print Epoch Data
         past_rews.popleft()
         past_rews.append(avg_reward)
@@ -206,6 +202,28 @@ def train(_, hyps, verbose=True):
         updater.info["EvalRew"] = eval_rew
         updater.info['AvgRew'] = avg_reward
         logger.append(updater.info, x_val=T)
+
+        if eval_rew > best_eval_rew or epoch % 10 == 0:
+            save_dict = {
+                "epoch":epoch,
+                "hyps":hyps,
+                "T": T,
+                "avg_rew": avg_reward,
+                "eval_rew": eval_rew,
+                "state_dict":net.state_dict(),
+                "optim_dict":updater.optim.state_dict(),
+                "min_rew": min_rew,
+                "max_rew": max_rew,
+                "rew_avg": rew_avg,
+                "avg_action": avg_action,
+            }
+            save_name = "checkpt"
+            save_name = os.path.join(hyps['save_folder'], save_name)
+            save_checkpt(save_dict, save_name, epoch, ext=".pt",
+                                       del_prev_sd=True,
+                                       best=(eval_rew>best_eval_rew))
+            if eval_rew > best_eval_rew:
+                best_eval_rew = eval_rew
 
         # Check for memory leaks
         gc.collect()
