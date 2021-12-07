@@ -31,5 +31,5 @@ hyps['n_test_eps'] = 50
 hyps['render'] = True
 runner = StatsRunner(hyps)
 
-print("Avg reward:", runner.rollout(net))
+print("Avg reward:", runner.rollout(net, verbose=True))
 

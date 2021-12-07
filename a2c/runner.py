@@ -114,8 +114,12 @@ class SequentialEnvironment:
         This function handles converting outputs from the model
         to actions of the appropriate form for the environment.
 
-        preds: torch tensor (..., N)
-            the outputs from the model
+        Args:
+            preds: torch tensor (..., N)
+                the outputs from the model
+        Returns:
+            actn: int
+                the sampled actions from the predictions
         """
         if self.is_gym:
             probs = F.softmax(preds, dim=-1)
@@ -295,7 +299,7 @@ class StatsRunner:
         self.obs_deque = deque(maxlen=self.hyps['n_frame_stack'])
         self.n_episodes = try_key(self.hyps, "n_test_eps", 15)
 
-    def rollout(self, net):
+    def rollout(self, net, verbose=False):
         """
         this function performs the data collection
 
@@ -311,6 +315,7 @@ class StatsRunner:
         net.eval() # fixes potential batchnorm and dropout issues
         prev_val = None
         ep_count = 0
+        rew_sum = 0
         while ep_count < self.n_episodes:
             state_in = cuda_if(torch.FloatTensor(state))[None] #(1,C,H,W)
             if h is not None:
@@ -325,6 +330,7 @@ class StatsRunner:
             if self.hyps['render']:
                 self.env.render()
             ep_rew += rew
+            rew_sum += rew
             reset = done
             if "Pong" in self.hyps['env_type'] and rew != 0:
                 done = True
@@ -333,6 +339,9 @@ class StatsRunner:
                 # Reset Recurrence
                 if h is not None:
                     h = cuda_if(torch.zeros(1,net.h_size))
+                if verbose:
+                    print("Episode Rew:", rew_sum)
+                    rew_sum = 0
 
             state = next_state(self.env, self.obs_deque, obs=obs,
                                                          reset=reset)
